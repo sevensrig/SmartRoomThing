@@ -1,0 +1,34 @@
+{
+  "server_host": "10.0.0.144",
+  "server_port": 5005,
+  "ha_url": "http://localhost:8123",
+  "ha_token": "REPLACE_WITH_HA_LONG_LIVED_TOKEN",
+  "spotify_client_id": "REPLACE_WITH_SPOTIFY_CLIENT_ID",
+  "spotify_client_secret": "REPLACE_WITH_SPOTIFY_CLIENT_SECRET",
+  "spotify_refresh_token": "REPLACE_WITH_SPOTIFY_REFRESH_TOKEN",
+  "speakers": {
+    "nest_audio":  { "entity_id": "media_player.REPLACE_WITH_NEST_AUDIO_ENTITY",  "name": "Nest Audio" },
+    "google_home": { "entity_id": "media_player.REPLACE_WITH_GOOGLE_HOME_ENTITY", "name": "Google Home" },
+    "chromecast":  { "entity_id": "media_player.REPLACE_WITH_CHROMECAST_ENTITY",  "name": "Chromecast" }
+  },
+  "presets": {
+    "1": {
+      "name": "DESK",
+      "nest_audio":  0.6,
+      "google_home": 0.5,
+      "chromecast":  0.7
+    },
+    "2": {
+      "name": "BED",
+      "nest_audio":  0.35,
+      "google_home": 0.3,
+      "chromecast":  0.45
+    },
+    "3": {
+      "name": "AMBIENT",
+      "nest_audio":  0.2,
+      "google_home": 0.15,
+      "chromecast":  0.25
+    }
+  }
+}

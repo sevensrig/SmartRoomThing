@@ -1,0 +1,14 @@
+# Secrets — real config with HA token + Spotify secret/refresh token.
+# Copy presets.example.json -> presets.json and fill in your own values.
+presets.json
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
