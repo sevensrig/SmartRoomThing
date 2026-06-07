@@ -1,0 +1,41 @@
+# systemd service for the Volume Presets server (native pychromecast control).
+#
+# Install:
+#   sudo cp volumepresets.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#
+# Start it manually (manual testing phase — see [Install] note below):
+#   sudo systemctl start volumepresets
+#   journalctl -u volumepresets -f          # follow logs
+#
+# Adjust User= and the paths below if your repo isn't at /home/pi/SmartRoomThing.
+
+[Unit]
+Description=Volume Presets server (Google speaker volume control via pychromecast)
+# The speakers are on the LAN; wait until the network is actually up so the
+# startup connections to each speaker IP can succeed.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/SmartRoomThing
+# Unbuffered so print() output reaches journald immediately (Python block-buffers
+# stdout when it isn't a TTY, which would otherwise delay/lose log lines).
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/SmartRoomThing/venv/bin/python3 /home/pi/SmartRoomThing/server.py
+Restart=on-failure
+RestartSec=5
+# stdout/stderr -> journald (view with: journalctl -u volumepresets)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+# NOTE: We are in the manual testing phase, so this service is intentionally
+# NOT enabled at boot. Start/stop it by hand with `systemctl start|stop`.
+#
+# When you're ready for it to auto-start at boot (24/7 operation), run:
+#   sudo systemctl enable volumepresets
+# (and `sudo systemctl disable volumepresets` to turn auto-start back off).
+WantedBy=multi-user.target

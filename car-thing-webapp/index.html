@@ -52,6 +52,16 @@
     position: absolute; top: 0; left: 0; width: 800px; height: 480px;
     display: flex; flex-direction: column;
   }
+  /* SAVE button (top-right) — arms "save current mix to a preset" */
+  #save-btn {
+    position: absolute; top: 8px; right: 12px; z-index: 5;
+    padding: 7px 16px; border-radius: 16px;
+    background: #181818; border: 1px solid #444; color: #aaa;
+    font-size: 13px; letter-spacing: 2px;
+  }
+  #save-btn.armed {
+    background: rgba(212,160,23,0.18); border-color: #d4a017; color: #f0c040;
+  }
   .faders {
     flex: 1; display: flex; flex-direction: row;
     align-items: flex-start; justify-content: space-around;
@@ -160,6 +170,7 @@
 
   <!-- Mixer view (live vertical faders) -->
   <div id="mixer-view">
+    <div id="save-btn">SAVE</div>
     <div class="header-bar"><canvas id="mix-header"></canvas></div>
     <div class="faders" id="faders"></div>
   </div>
@@ -355,9 +366,14 @@ const STATE = {
 const SPEAKER_ORDER = ['nest_audio', 'google_home', 'chromecast'];
 const VOL_STEP = 0.05;    // per dial detent / arrow key
 const NP_RETURN_MS = 12000; // idle delay before the mixer reverts to Now Playing
+const SAVE_ARM_MS = 6000;   // how long "save" stays armed waiting for a preset
 let focusTimer = null;
 let npReturnTimer = null;
 let mixerBuilt = false;
+let saveArmed = false;      // when true, pressing 1/2/3 SAVES instead of activates
+let saveArmTimer = null;
+let savedFlash = '';        // transient "SAVED -> NAME" header message
+let savedFlashTimer = null;
 
 /* Now Playing is home: after the mixer is idle for a bit, return to it. */
 function scheduleReturnToNowPlaying() {
@@ -430,11 +446,17 @@ function buildFaders() {
 function renderMixer() {
   buildFaders();
 
-  // Header reflects what the dial currently controls.
+  // Header reflects save-mode / what the dial currently controls.
   const presets = (STATE.config && STATE.config.presets) || {};
   const ap = STATE.activePreset && presets[STATE.activePreset];
   let title, color, glow, bright;
-  if (STATE.focus) {
+  if (savedFlash) {
+    title = savedFlash;
+    color = '60,220,90'; glow = 7; bright = 0.95;
+  } else if (saveArmed) {
+    title = 'SAVE TO 1 2 3';
+    color = '212,160,23'; glow = 7; bright = 0.95;
+  } else if (STATE.focus) {
     title = (SPEAKER_LABELS[STATE.focus] || 'DEVICE') + ' VOL';
     color = '212,160,23'; glow = 7; bright = 0.95;
   } else if (ap) {
@@ -444,7 +466,9 @@ function renderMixer() {
     title = 'VOLUME';
     color = '180,180,180'; glow = 4; bright = 0.7;
   }
-  renderDotTextFit(document.getElementById('mix-header'), title, 360, 5, color, glow, bright);
+  renderDotTextFit(document.getElementById('mix-header'), title, 420, 5, color, glow, bright);
+  const sb = document.getElementById('save-btn');
+  if (sb) sb.classList.toggle('armed', saveArmed);
 
   // Faders
   document.querySelectorAll('#faders .fader').forEach((fader) => {
@@ -493,6 +517,37 @@ async function activatePreset(id) {
   } catch (e) {
     console.error('preset activation error', e);
   }
+}
+
+/* --- Save current mix to a preset ------------------------------------- */
+function armSave() {
+  saveArmed = !saveArmed;          // tapping SAVE toggles
+  if (saveArmTimer) clearTimeout(saveArmTimer);
+  if (saveArmed) {
+    saveArmTimer = setTimeout(() => { saveArmed = false; renderMixer(); }, SAVE_ARM_MS);
+    scheduleReturnToNowPlaying();
+  }
+  renderMixer();
+}
+
+async function savePreset(id) {
+  saveArmed = false;
+  if (saveArmTimer) clearTimeout(saveArmTimer);
+  try {
+    const r = await fetch(SERVER + '/preset/' + id + '/save', { method: 'POST' });
+    const j = await r.json();
+    if (j && j.ok) {
+      STATE.activePreset = id;
+      if (STATE.config && STATE.config.presets && STATE.config.presets[id] && j.levels) {
+        Object.assign(STATE.config.presets[id], j.levels);  // keep local config in sync
+      }
+      savedFlash = 'SAVED ' + (j.preset || '');
+      if (savedFlashTimer) clearTimeout(savedFlashTimer);
+      savedFlashTimer = setTimeout(() => { savedFlash = ''; renderMixer(); }, 1800);
+      scheduleReturnToNowPlaying();
+    }
+  } catch (e) { console.error('save preset error', e); }
+  renderMixer();
 }
 
 async function adjustVolume(delta) {
@@ -700,9 +755,10 @@ function stopEQ() {
  * ========================================================= */
 function bindKeyboard() {
   window.addEventListener('keydown', (e) => {
-    if (e.key === '1') { activatePreset('1'); }
-    else if (e.key === '2') { activatePreset('2'); }
-    else if (e.key === '3') { activatePreset('3'); }
+    if (e.key === '1' || e.key === '2' || e.key === '3') {
+      if (saveArmed) savePreset(e.key);   // SAVE armed → store current mix here
+      else activatePreset(e.key);
+    }
     else if (e.key === '4') { toggleView(); }
     else if (e.key === 'ArrowUp')   { adjustVolume(+VOL_STEP); }
     else if (e.key === 'ArrowDown') { adjustVolume(-VOL_STEP); }
@@ -718,10 +774,16 @@ function bindKeyboard() {
     else if (d < 0) adjustVolume(-VOL_STEP);
   }, { passive: true });
 
+  // SAVE button: arm "save current mix to a preset" (then press 1/2/3).
+  document.getElementById('save-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    armSave();
+  });
+
   // Tapping anywhere on the mixer that isn't a fader deselects the focused
   // device, so the dial goes back to controlling all speakers together.
   document.getElementById('mixer-view').addEventListener('click', (e) => {
-    if (e.target.closest('.fader')) return;  // fader taps handle their own focus
+    if (e.target.closest('.fader') || e.target.closest('#save-btn')) return;
     if (STATE.focus) {
       STATE.focus = null;
       if (focusTimer) clearTimeout(focusTimer);

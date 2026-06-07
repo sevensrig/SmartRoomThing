@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Volume presets server for Google Home speakers, controlled by a Car Thing.
 
-Speaker volume commands are routed through the Home Assistant REST API rather
-than the Google Home Local API. Home Assistant maintains its own persistent
-connection to the speakers and accepts a long-lived token that never expires,
-which avoids the 403 / 24h token churn of calling the speakers directly.
+Speaker volume commands are sent natively over the LAN with pychromecast. On
+startup the server opens one persistent Cast connection per speaker (by static
+IP — no zeroconf/mDNS discovery) and caches it; volume changes are pushed
+directly to the device. This replaces the previous Home Assistant + Docker
+setup, so the whole thing runs comfortably on a Raspberry Pi 2.
+
+Spotify is still fully proxied server-side (the Car Thing has no internet of its
+own); that logic is unchanged.
 """
 
 import base64
@@ -12,10 +16,12 @@ import json
 import os
 import time
 import sys
+import threading
+import uuid
 import urllib.request
 import urllib.error
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
+import pychromecast
 from flask import Flask, jsonify, request, send_from_directory, make_response
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,8 +35,10 @@ SPEAKERS = CONFIG["speakers"]
 PRESETS = CONFIG["presets"]
 SERVER_HOST = CONFIG.get("server_host", "0.0.0.0")
 SERVER_PORT = int(CONFIG.get("server_port", 5005))
-HA_URL = CONFIG["ha_url"].rstrip("/")
-HA_TOKEN = CONFIG["ha_token"]
+
+# The standard Google Cast control port. Speakers have static DHCP reservations,
+# so we connect straight to this host:port and never touch zeroconf/mDNS.
+CAST_PORT = 8009
 
 
 def _config_value(key):
@@ -56,6 +64,45 @@ STATE = {
     "active_preset": None,
     "volumes": {key: 0.0 for key in SPEAKERS},
 }
+
+# Persistent Cast connections, one per speaker, opened once at startup and
+# reused for every volume command. A speaker that is unreachable at startup is
+# stored as None; we never block a request retrying it.
+#   CASTS[key]      -> pychromecast.Chromecast | None
+#   CAST_LOCKS[key] -> threading.Lock guarding mutations on that connection
+CASTS = {}
+CAST_LOCKS = {key: threading.Lock() for key in SPEAKERS}
+
+
+def _connect_speaker(key):
+    """Open a persistent Cast connection to one speaker by static IP.
+
+    Returns the connected Chromecast, or None if it can't be reached. Connecting
+    by host (not mDNS discovery) keeps the memory/CPU footprint tiny on the Pi
+    and works as long as the speaker has a static DHCP reservation.
+    """
+    ip = SPEAKERS[key]["ip_address"]
+    try:
+        # get_chromecast_from_host builds a host-only connection (no zeroconf):
+        # (host, port, uuid, model_name, friendly_name). The uuid is just a local
+        # identifier for a direct host connection, so a random one is fine.
+        cast = pychromecast.get_chromecast_from_host(
+            (ip, CAST_PORT, uuid.uuid4(), None, None),
+            tries=1, retry_wait=2, timeout=5,
+        )
+        cast.wait(timeout=10)  # block until the device is ready for commands
+        print(f"[{key}] connected to {ip} ({cast.cast_info.friendly_name or 'cast'})")
+        return cast
+    except Exception as e:
+        print(f"[{key}] WARNING: could not connect to {ip}: {e}")
+        return None
+
+
+def _init_casts():
+    """Connect to every speaker at startup. Never crashes on an unreachable one."""
+    for key in SPEAKERS:
+        CASTS[key] = _connect_speaker(key)
+
 
 app = Flask(__name__, static_folder=None)
 
@@ -387,77 +434,77 @@ def spotify_previous():
 
 
 def _set_speaker_volume(speaker_key, volume):
-    speaker = SPEAKERS[speaker_key]
-    entity_id = speaker["entity_id"]
-    url = f"{HA_URL}/api/services/media_player/volume_set"
-    payload = json.dumps(
-        {"entity_id": entity_id, "volume_level": float(volume)}
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {HA_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    """Push an absolute volume (0.0–1.0) to one speaker over its Cast connection.
+
+    Records the intended level in STATE first so the mixer/ratio math stays
+    consistent even when the push fails (the speaker may be temporarily offline).
+    A missing connection or a thrown call fails silently for that speaker — we
+    log it and move on, never retrying or blocking.
+    """
+    volume = float(volume)
+    STATE["volumes"][speaker_key] = volume
+    cast = CASTS.get(speaker_key)
+    if cast is None:
+        print(f"[{speaker_key}] not connected — skipping (target {volume:.2f})")
+        return {"speaker": speaker_key, "ok": False, "error": "not connected"}
     try:
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            status = resp.status
-            body = resp.read().decode("utf-8", errors="replace")
-            print(f"[{speaker_key}] {entity_id} -> {volume:.2f} | HTTP {status} {body[:80]}")
-            STATE["volumes"][speaker_key] = float(volume)
-            return {"speaker": speaker_key, "ok": True, "status": status}
-    except urllib.error.HTTPError as e:
-        print(f"[{speaker_key}] {entity_id} HTTPError {e.code}: {e.reason}")
-        return {"speaker": speaker_key, "ok": False, "error": f"HTTP {e.code} {e.reason}"}
-    except urllib.error.URLError as e:
-        print(f"[{speaker_key}] {entity_id} URLError: {e.reason}")
-        return {"speaker": speaker_key, "ok": False, "error": str(e.reason)}
+        with CAST_LOCKS[speaker_key]:
+            cast.set_volume(volume)
+        print(f"[{speaker_key}] -> {volume:.2f}")
+        return {"speaker": speaker_key, "ok": True}
     except Exception as e:
-        print(f"[{speaker_key}] {entity_id} Error: {e}")
+        print(f"[{speaker_key}] set_volume failed: {e}")
         return {"speaker": speaker_key, "ok": False, "error": str(e)}
 
 
 def _dispatch_volumes(volume_map):
-    with ThreadPoolExecutor(max_workers=len(volume_map)) as ex:
-        futures = {
-            ex.submit(_set_speaker_volume, key, vol): key
-            for key, vol in volume_map.items()
-        }
-        return [f.result() for f in futures]
+    """Fan out volume changes to all speakers concurrently (one thread each) and
+    join before returning, so the HTTP response reflects actual completion."""
+    results = {}
+
+    def worker(key, vol):
+        results[key] = _set_speaker_volume(key, vol)
+
+    threads = [
+        threading.Thread(target=worker, args=(key, vol), name=f"vol-{key}")
+        for key, vol in volume_map.items()
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return [results[key] for key in volume_map]
 
 
 _volumes_synced_at = 0.0
 
 
-def _refresh_volumes_from_ha(force=False):
-    """Pull each speaker's current volume_level from Home Assistant into STATE.
+def _refresh_volumes_from_casts(force=False):
+    """Sync STATE["volumes"] from each speaker's real, current volume level.
 
     The server doesn't otherwise know the real speaker volumes (it only tracks
     what it has set), so after a restart it would start at 0 and the dial would
-    yank everything down. This keeps STATE in sync with reality. Throttled so the
-    webapp's frequent /status polls don't hammer HA."""
+    yank everything down. pychromecast keeps each cast's status live in a
+    background worker thread, so reading cast.status.volume_level is a cheap
+    local lookup (no network call). Throttled to match the old behaviour so the
+    webapp's frequent /status polls stay light."""
     global _volumes_synced_at
     now = time.time()
     if not force and (now - _volumes_synced_at) < 2.0:
         return
     _volumes_synced_at = now
-    for key, info in SPEAKERS.items():
-        entity_id = info["entity_id"]
-        req = urllib.request.Request(
-            f"{HA_URL}/api/states/{entity_id}",
-            headers={"Authorization": f"Bearer {HA_TOKEN}"},
-        )
+    for key in SPEAKERS:
+        cast = CASTS.get(key)
+        if cast is None:
+            continue  # unreachable — keep last known
         try:
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            vol = data.get("attributes", {}).get("volume_level")
+            with CAST_LOCKS[key]:
+                status = cast.status
+            vol = status.volume_level if status else None
             if isinstance(vol, (int, float)):
                 STATE["volumes"][key] = round(float(vol), 4)
         except Exception:
-            pass  # HA not ready yet / speaker unavailable — keep last known
+            pass  # status not ready yet / speaker unavailable — keep last known
 
 
 @app.route("/preset/<preset_id>", methods=["POST"])
@@ -467,12 +514,32 @@ def activate_preset(preset_id):
     preset = PRESETS[preset_id]
     volume_map = {key: preset[key] for key in SPEAKERS if key in preset}
     print(f"\n=== Activating preset {preset_id} ({preset['name']}) ===")
-    results = _dispatch_volumes(volume_map)
-    failed = [r for r in results if not r["ok"]]
-    if failed:
-        return jsonify({"ok": False, "error": failed[0]["error"], "results": results}), 500
+    # Fan out to every speaker. A speaker that's offline fails silently inside
+    # _set_speaker_volume (logged, not raised) — we still apply the preset and
+    # report success so a single dead speaker never blacks out the mixer UI.
+    _dispatch_volumes(volume_map)
     STATE["active_preset"] = preset_id
     return jsonify({"ok": True, "preset": preset["name"], "volumes": STATE["volumes"]})
+
+
+@app.route("/preset/<preset_id>/save", methods=["POST"])
+def save_preset(preset_id):
+    """Overwrite a preset with the current live mix and persist it to disk."""
+    if preset_id not in PRESETS:
+        return jsonify({"ok": False, "error": f"unknown preset {preset_id}"}), 404
+    for key in SPEAKERS:
+        PRESETS[preset_id][key] = round(float(STATE["volumes"].get(key, 0.0)), 4)
+    try:
+        with open(PRESETS_PATH, "w") as f:
+            json.dump(CONFIG, f, indent=2)  # CONFIG["presets"] is PRESETS
+            f.write("\n")
+    except Exception as e:
+        print(f"[save_preset] write failed: {e}")
+        return jsonify({"ok": False, "error": f"write failed: {e}"}), 500
+    STATE["active_preset"] = preset_id
+    levels = {key: PRESETS[preset_id][key] for key in SPEAKERS}
+    print(f"\n=== Saved preset {preset_id} ({PRESETS[preset_id]['name']}) = {levels} ===")
+    return jsonify({"ok": True, "preset": PRESETS[preset_id]["name"], "levels": levels})
 
 
 def _clamp01(x):
@@ -494,11 +561,11 @@ def adjust_volume():
     vols = STATE["volumes"]
 
     # If the relevant level looks uninitialized (e.g. right after a restart),
-    # pull the real value from HA first so we scale from it instead of from 0.
+    # pull the real value from the speakers first so we scale from it, not 0.
     target_zero = (vols.get(speaker, 0.0) <= 0.0) if speaker in SPEAKERS \
         else (max(vols.values()) if vols else 0.0) <= 0.0
     if target_zero:
-        _refresh_volumes_from_ha(force=True)
+        _refresh_volumes_from_casts(force=True)
         vols = STATE["volumes"]
 
     if speaker in SPEAKERS:
@@ -516,16 +583,15 @@ def adjust_volume():
             new_volumes = {key: round(vols.get(key, 0.0) * factor, 4) for key in SPEAKERS}
         print(f"\n=== Volume adjust (ratio) delta={delta:+.3f} ===")
 
-    results = _dispatch_volumes(new_volumes)
-    failed = [r for r in results if not r["ok"]]
-    if failed:
-        return jsonify({"ok": False, "error": failed[0]["error"], "results": results}), 500
+    # Offline speakers fail silently in _set_speaker_volume; the intended levels
+    # are still recorded in STATE, so the UI stays consistent and responsive.
+    _dispatch_volumes(new_volumes)
     return jsonify({"ok": True, "volumes": STATE["volumes"]})
 
 
 @app.route("/status", methods=["GET"])
 def status():
-    _refresh_volumes_from_ha()  # keep the UI showing the speakers' real levels
+    _refresh_volumes_from_casts()  # keep the UI showing the speakers' real levels
     return jsonify({
         "active_preset": STATE["active_preset"],
         "volumes": STATE["volumes"],
@@ -538,19 +604,23 @@ def main():
     print("=" * 60)
     print(f" URL:  http://{SERVER_HOST}:{SERVER_PORT}")
     print(f" Bind: 0.0.0.0:{SERVER_PORT}")
-    print(f" Home Assistant: {HA_URL}")
     if SPOTIFY_CONFIGURED:
         print(" Spotify:        configured (refresh token loaded)")
     else:
-        print(f" Spotify:        NOT configured — visit http://127.0.0.1:{SERVER_PORT}/auth on this Mac")
+        print(f" Spotify:        NOT configured — visit http://127.0.0.1:{SERVER_PORT}/auth")
+    print(" Connecting to speakers (by static IP, no discovery):")
+    _init_casts()
     print(" Speakers:")
     for key, info in SPEAKERS.items():
-        print(f"   - {key:12s} {info['name']:14s} {info['entity_id']}")
+        state = "connected" if CASTS.get(key) is not None else "OFFLINE"
+        print(f"   - {key:12s} {info['name']:14s} {info['ip_address']:18s} [{state}]")
     print(" Presets:")
     for pid, p in PRESETS.items():
         print(f"   [{pid}] {p['name']}")
     print("=" * 60)
     sys.stdout.flush()
+    # threaded=True: the webapp polls /status while volume/preset requests run, so
+    # requests can overlap. Per-speaker CAST_LOCKS guard each cast connection.
     app.run(host="0.0.0.0", port=SERVER_PORT, debug=False, threaded=True)
 
 

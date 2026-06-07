@@ -283,6 +283,156 @@ next preset press.
 
 ---
 
+## Raspberry Pi Setup
+
+This is the **lightweight native deployment** designed to run 24/7 on a
+**Raspberry Pi 2 (1GB RAM, ARM)**. It drops the Mac + Docker + Home Assistant
+stack entirely: the server talks to the speakers **directly over the LAN with
+[`pychromecast`](https://github.com/home-assistant-libs/pychromecast)**, opening
+one persistent connection per speaker by **static IP** (no zeroconf/mDNS
+discovery, so the footprint stays tiny). Everything else — the Car Thing webapp,
+the USB `adb reverse` tunnel, and the server-side Spotify proxy — works exactly
+as on the Mac.
+
+```
+[Car Thing] ──USB (adb reverse :5005)──> [Raspberry Pi Flask server] ──Cast──> speakers
+   webapp @ localhost:5005                          │                  (by static IP, :8009)
+                                                     └── proxies ──> [Spotify Web API] (now-playing, art)
+```
+
+> **Config format note:** on this branch, `presets.example.json` uses the Pi
+> format — each speaker has an `ip_address` (its static DHCP IP) instead of a
+> Home Assistant `entity_id`, and the `ha_url` / `ha_token` fields are gone.
+> Spotify and preset fields are unchanged. (If you're following the **Mac + Home
+> Assistant** steps above instead, keep your existing HA-format `presets.json`.)
+
+### Pi Step 1 — Give your speakers static IPs
+
+Same as the Mac setup's Step 1: add a **DHCP reservation** on your router for
+each speaker's MAC so its IP never changes. The server connects to these IPs
+directly, so a stable address per speaker is **required** here (there's no
+discovery to fall back on). Note each speaker's IP (e.g. `10.0.0.50`,
+`10.0.0.51`, `10.0.0.52`).
+
+### Pi Step 2 — Install dependencies
+
+```bash
+sudo apt update
+sudo apt install -y python3-venv adb
+```
+
+Then create the virtualenv and install the Python packages (Flask + pychromecast):
+
+```bash
+cd /home/pi/SmartRoomThing          # adjust if you cloned elsewhere
+python3 -m venv venv
+./venv/bin/pip install --upgrade pip
+./venv/bin/pip install flask pychromecast
+```
+
+> On a Pi 2 the `pychromecast` install pulls in `zeroconf`/`protobuf` and can
+> take a few minutes (some wheels build from source). It only uses them for the
+> direct host connection — discovery is never run.
+
+### Pi Step 3 — Copy and edit `presets.json`
+
+```bash
+cp presets.example.json presets.json
+```
+
+Edit `presets.json` and set each speaker's `ip_address` to the static IP from
+Pi Step 1, then tune the per-speaker preset volumes (floats `0.0`–`1.0`). Fill
+in the Spotify fields too if you use Now Playing (see the Mac **Step 8** for the
+one-time OAuth flow — it's identical, just open `http://127.0.0.1:5005/auth` on
+the Pi or via an SSH port-forward). `presets.json` is git-ignored — never commit
+it.
+
+### Pi Step 4 — Test the server manually
+
+```bash
+./venv/bin/python3 server.py
+```
+
+The startup banner lists each speaker with `[connected]` or `[OFFLINE]`. An
+offline speaker is logged as a warning and skipped — the server never crashes or
+blocks on an unreachable speaker. Verify from another machine on the LAN:
+
+```bash
+curl -X POST http://<pi-ip>:5005/preset/1     # speakers should jump to the DESK mix
+```
+
+Stop with Ctrl-C.
+
+### Pi Step 5 — Install the systemd service
+
+```bash
+sudo cp volumepresets.service /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+Edit `/etc/systemd/system/volumepresets.service` if your repo path or username
+differ from `/home/pi/SmartRoomThing` / `pi`. Then start it **manually** (we are
+in the testing phase — it is intentionally **not** enabled at boot yet):
+
+```bash
+sudo systemctl start volumepresets
+journalctl -u volumepresets -f          # follow the logs
+```
+
+The service binds to `network-online.target`, so the speakers are reachable when
+the server starts its connections. `Restart=on-failure` brings it back if it
+crashes.
+
+### Pi Step 6 — Deploy the webapp to the Car Thing
+
+This is identical to the Mac setup's **Step 7** (`adb push` the webapp,
+disable the kiosk Chromium cache, commit the rootfs writes). `adb` works the
+same on the Pi — just run those commands on the Pi with the Car Thing plugged
+into the **Pi's** USB.
+
+### Pi Step 7 — Install the udev rule for auto `adb reverse`
+
+So the USB tunnel comes up automatically whenever the Car Thing is plugged in,
+install the oneshot service and the udev rule that triggers it:
+
+```bash
+sudo cp adb-reverse.service /etc/systemd/system/
+sudo cp udev/99-carthing-adb.rules /etc/udev/rules.d/
+sudo systemctl daemon-reload
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+**Verify the device USB IDs first.** The rule matches `idVendor`/`idProduct`;
+with the Car Thing plugged in, run `lsusb` (or
+`udevadm monitor --udev --subsystem-match=usb` and replug) to confirm the IDs,
+then edit `udev/99-carthing-adb.rules` to match. On plug-in, udev starts
+`adb-reverse.service`, which runs `adb-reverse.sh` — it retries for ~30s to ride
+out the gap between USB enumeration and adb authorizing the device. Check it:
+
+```bash
+journalctl -u adb-reverse -f            # watch for "adb reverse tcp:5005 established"
+adb reverse --list                      # should show 5005
+```
+
+> First-time adb authorization: the Car Thing may need to accept the host key.
+> If `adb devices` shows `unauthorized`, accept the prompt (or it's auto-accepted
+> on the stock Car Thing image), then replug.
+
+### Pi Step 8 — Enable auto-start at boot (when ready)
+
+Once you've confirmed everything works in manual testing, enable both units so
+they start automatically on every boot for 24/7 operation:
+
+```bash
+sudo systemctl enable volumepresets
+sudo systemctl enable adb-reverse      # also fires via udev on plug-in
+```
+
+To turn auto-start back off: `sudo systemctl disable volumepresets`.
+
+---
+
 ## How it works
 
 - **`server.py`** — Flask, binds `0.0.0.0:5005`. Loads `presets.json` on
@@ -328,6 +478,7 @@ next preset press.
 |--------|---------------------|-----------------------|---------|
 | GET    | `/presets`          | —                     | `{presets, speakers, spotify_configured}` (no secrets) |
 | POST   | `/preset/<id>`      | —                     | `{ok, preset, volumes}` |
+| POST   | `/preset/<id>/save` | —                     | `{ok, preset, levels}` — saves the live mix into the preset (writes `presets.json`) |
 | POST   | `/volume/adjust`    | `{"delta": ±N}` or `{"delta": ±N, "speaker": "<key>"}` | `{ok, volumes}` — ALL (proportional) or one speaker |
 | GET    | `/status`           | —                     | `{active_preset, volumes}` |
 | GET    | `/spotify/now-playing` | —                  | Current track JSON, or `{item:null, is_playing:false}` |
@@ -348,6 +499,7 @@ next preset press.
 | Button 4         | Toggle Mixer ↔ Now Playing view       |
 | Dial scroll      | Volume up/down (live faders)          |
 | Tap a fader      | Control just that speaker (~4s, then back to ALL) |
+| Tap **SAVE**, then 1/2/3 | Save the current mix into that preset |
 
 By default the dial scales **all speakers together by a fixed ratio** — the
 loudest moves by the step and the rest scale to match, preserving the per-speaker
@@ -355,6 +507,11 @@ balance and capping at 1.0 so nothing clips. **Tap a fader** to focus one
 speaker; the dial then adjusts only that one until it auto-returns to ALL a few
 seconds later. The Mixer view shows all three live levels and updates as you turn
 the dial.
+
+**Saving presets from the device:** dial in the mix you want, tap the **SAVE**
+button (top-right of the Mixer), then press preset button **1, 2, or 3** — the
+current levels are written into that preset in `presets.json`. (Tapping SAVE
+again, or waiting a few seconds, cancels.)
 
 The dial is a rotary encoder that the webview delivers as DOM `wheel` events
 (it has no keyboard handler). Desktop/browser fallback for testing: keys

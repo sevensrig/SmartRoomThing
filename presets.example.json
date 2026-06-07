@@ -1,15 +1,13 @@
 {
-  "server_host": "10.0.0.144",
+  "server_host": "0.0.0.0",
   "server_port": 5005,
-  "ha_url": "http://localhost:8123",
-  "ha_token": "REPLACE_WITH_HA_LONG_LIVED_TOKEN",
   "spotify_client_id": "REPLACE_WITH_SPOTIFY_CLIENT_ID",
   "spotify_client_secret": "REPLACE_WITH_SPOTIFY_CLIENT_SECRET",
   "spotify_refresh_token": "REPLACE_WITH_SPOTIFY_REFRESH_TOKEN",
   "speakers": {
-    "nest_audio":  { "entity_id": "media_player.REPLACE_WITH_NEST_AUDIO_ENTITY",  "name": "Nest Audio" },
-    "google_home": { "entity_id": "media_player.REPLACE_WITH_GOOGLE_HOME_ENTITY", "name": "Google Home" },
-    "chromecast":  { "entity_id": "media_player.REPLACE_WITH_CHROMECAST_ENTITY",  "name": "Chromecast" }
+    "nest_audio":  { "ip_address": "10.0.0.50", "name": "Nest Audio" },
+    "google_home": { "ip_address": "10.0.0.51", "name": "Google Home" },
+    "chromecast":  { "ip_address": "10.0.0.52", "name": "Chromecast" }
   },
   "presets": {
     "1": {
