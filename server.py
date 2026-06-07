@@ -56,6 +56,10 @@ SPOTIFY_REFRESH_TOKEN = _config_value("spotify_refresh_token")
 SPOTIFY_CONFIGURED = bool(
     SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET and SPOTIFY_REFRESH_TOKEN
 )
+# Name of the Spotify Connect target (the Google speaker group) to start
+# playlists on, exactly as Spotify reports it. Read from config so the device
+# name is never hardcoded in the webapp; matched case-insensitively by substring.
+SPOTIFY_CONNECT_DEVICE = _config_value("spotify_connect_device")
 # Spotify only grants the http (non-https) loopback exception to 127.0.0.1, and
 # the redirect URI must match the dashboard exactly. Keep it at the root path.
 SPOTIFY_REDIRECT_URI = f"http://127.0.0.1:{SERVER_PORT}/"
@@ -159,7 +163,7 @@ AUTH_PAGE_TEMPLATE = """<!DOCTYPE html>
 var CLIENT_ID = '__CLIENT_ID__';
 var CLIENT_SECRET = '__CLIENT_SECRET__';
 var REDIRECT_URI = '__REDIRECT_URI__';
-var SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state';
+var SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative';
 
 function qs(name){ return new URLSearchParams(location.search).get(name); }
 
@@ -431,6 +435,140 @@ def spotify_next():
 @app.route("/spotify/previous", methods=["POST"])
 def spotify_previous():
     return _spotify_command("POST", "previous")
+
+
+def _spotify_fetch_devices(token):
+    """Return the raw Spotify Connect devices array. Raises on transport error."""
+    req = urllib.request.Request(
+        "https://api.spotify.com/v1/me/player/devices",
+        headers={"Authorization": "Bearer " + token},
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return data.get("devices", [])
+
+
+@app.route("/spotify/playlists", methods=["GET"])
+def spotify_playlists():
+    """Return the user's saved playlists as [{id, name, image_url}].
+
+    `id` is the playlist URI (spotify:playlist:...) so it can be handed straight
+    back to /spotify/play-playlist as a context_uri. Always live (not cached);
+    the webapp does its own in-memory caching."""
+    if not SPOTIFY_CONFIGURED:
+        return jsonify({"error": "spotify not configured"}), 503
+    token = _spotify_access_token()
+    if not token:
+        return jsonify({"error": "token refresh failed"}), 502
+    req = urllib.request.Request(
+        "https://api.spotify.com/v1/me/playlists?limit=50",
+        headers={"Authorization": "Bearer " + token},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        print(f"[spotify] playlists failed: HTTP {e.code}")
+        return jsonify({"error": f"HTTP {e.code}"}), 502
+    except Exception as e:
+        print(f"[spotify] playlists error: {e}")
+        return jsonify({"error": str(e)}), 502
+    out = []
+    for it in data.get("items", []):
+        if not it:
+            continue  # Spotify occasionally returns null items for dead playlists
+        images = it.get("images") or []
+        out.append({
+            "id": it.get("uri"),
+            "name": it.get("name", ""),
+            "image_url": images[0].get("url") if images else None,
+        })
+    return jsonify(out)
+
+
+@app.route("/spotify/devices", methods=["GET"])
+def spotify_devices():
+    """Return the raw Spotify Connect devices array (for display / future use)."""
+    if not SPOTIFY_CONFIGURED:
+        return jsonify({"error": "spotify not configured"}), 503
+    token = _spotify_access_token()
+    if not token:
+        return jsonify({"error": "token refresh failed"}), 502
+    try:
+        return jsonify(_spotify_fetch_devices(token))
+    except urllib.error.HTTPError as e:
+        print(f"[spotify] devices failed: HTTP {e.code}")
+        return jsonify({"error": f"HTTP {e.code}"}), 502
+    except Exception as e:
+        print(f"[spotify] devices error: {e}")
+        return jsonify({"error": str(e)}), 502
+
+
+@app.route("/spotify/play-playlist", methods=["POST"])
+def spotify_play_playlist():
+    """Start a playlist on a Spotify Connect device (the Google speaker group).
+
+    Body: {"playlist_uri": "spotify:playlist:...", "device_name": "..."}.
+    `device_name` is optional and defaults to `spotify_connect_device` from
+    presets.json, so the target never has to be hardcoded in the webapp. The
+    device is matched by case-insensitive substring of its Spotify-reported name.
+
+    This is a *separate* endpoint from /spotify/play (which stays a plain
+    resume-playback call) so no existing caller's behaviour changes."""
+    if not SPOTIFY_CONFIGURED:
+        return jsonify({"ok": False, "error": "spotify not configured"}), 503
+    data = request.get_json(silent=True) or {}
+    playlist_uri = data.get("playlist_uri")
+    device_name = data.get("device_name") or SPOTIFY_CONNECT_DEVICE
+    if not playlist_uri:
+        return jsonify({"ok": False, "error": "missing playlist_uri"}), 400
+    if not device_name:
+        return jsonify({
+            "ok": False,
+            "error": "no device_name (set spotify_connect_device in presets.json)",
+        }), 400
+    token = _spotify_access_token()
+    if not token:
+        return jsonify({"ok": False, "error": "token refresh failed"}), 502
+
+    # 1) Find the target Connect device by (case-insensitive substring) name.
+    try:
+        devices = _spotify_fetch_devices(token)
+    except urllib.error.HTTPError as e:
+        print(f"[spotify] play-playlist devices lookup failed: HTTP {e.code}")
+        return jsonify({"ok": False, "error": f"HTTP {e.code}"}), 502
+    except Exception as e:
+        print(f"[spotify] play-playlist devices lookup error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 502
+    needle = device_name.lower()
+    match = next((d for d in devices if needle in (d.get("name") or "").lower()), None)
+    if not match:
+        names = [d.get("name") for d in devices]
+        print(f"[spotify] play-playlist: device '{device_name}' not found among {names}")
+        return jsonify({"error": "device not found"}), 404
+
+    # 2) Start the playlist context on that device.
+    device_id = match.get("id", "")
+    url = ("https://api.spotify.com/v1/me/player/play?device_id="
+           + urllib.parse.quote(device_id))
+    body = json.dumps({"context_uri": playlist_uri}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body, method="PUT",
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            print(f"[spotify] play-playlist {playlist_uri} on '{match.get('name')}' -> {resp.status}")
+            return jsonify({"ok": True})
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:200]
+        print(f"[spotify] play-playlist failed: HTTP {e.code} {detail}")
+        return jsonify({"ok": False, "error": f"HTTP {e.code}", "detail": detail}), 502
+    except Exception as e:
+        print(f"[spotify] play-playlist error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 
 def _set_speaker_volume(speaker_key, volume):

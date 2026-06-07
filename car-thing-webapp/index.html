@@ -156,6 +156,40 @@
   .skip-bar  { width:4px; height:26px; background:#e6e6e6; }
   .pause-bar { width:7px; height:26px; background:#e6e6e6; }
 
+  /* --- Playlists view --- */
+  #playlists-view {
+    position: absolute; top: 0; left: 0; width: 800px; height: 480px;
+    display: none; flex-direction: column;
+  }
+  #pl-body { flex: 1; position: relative; overflow: hidden; }
+  /* explicit edges (the old webview lacks the `inset` shorthand) */
+  #pl-list {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column; align-items: stretch;
+    padding: 14px 40px 0; box-sizing: border-box;
+  }
+  .pl-row {
+    height: 54px; flex-shrink: 0;
+    display: flex; align-items: center;
+    padding: 0 16px; box-sizing: border-box; border-radius: 8px;
+    transition: background 0.15s, box-shadow 0.15s;
+  }
+  .pl-row.sel {
+    background: rgba(212, 160, 23, 0.12);
+    box-shadow: inset 0 0 0 2px rgba(212, 160, 23, 0.6);
+  }
+  .pl-row canvas { display: block; max-width: 100%; }
+  #pl-overlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: none; align-items: center; justify-content: center;
+  }
+  #pl-overlay canvas { display: block; }
+  #pl-hint {
+    height: 42px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border-top: 1px solid #1a1a1a;
+  }
+
   /* shared canvas defaults */
   canvas { image-rendering: pixelated; }
 </style>
@@ -200,6 +234,16 @@
       <div class="np-btn main" id="btn-playpause"></div>
       <div class="np-btn" id="btn-next"><span class="tri-r"></span><span class="skip-bar"></span></div>
     </div>
+  </div>
+
+  <!-- Playlists view (dial scrolls, button 1 plays, button 2 refreshes) -->
+  <div id="playlists-view">
+    <div class="header-bar"><canvas id="pl-header"></canvas></div>
+    <div id="pl-body">
+      <div id="pl-list"></div>
+      <div id="pl-overlay"><canvas id="pl-overlay-canvas"></canvas></div>
+    </div>
+    <div id="pl-hint"><canvas id="pl-hint-canvas"></canvas></div>
   </div>
 
 </div>
@@ -385,6 +429,199 @@ function scheduleReturnToNowPlaying() {
 }
 function cancelReturnToNowPlaying() {
   if (npReturnTimer) { clearTimeout(npReturnTimer); npReturnTimer = null; }
+}
+
+/* =========================================================
+ *  PLAYLISTS SCREEN
+ *  Opened with the back button (see input handlers). The dial scrolls the
+ *  selection, button 1 plays the selected playlist on the Spotify Connect
+ *  device (server reads the target from presets.json), button 2 re-fetches.
+ *  Same dot-matrix canvas rendering as the rest of the UI — text only.
+ * ========================================================= */
+const PL_VISIBLE_ROWS = 6;        // rows drawn at once (list scrolls within)
+const playlistState = {
+  items: [],            // [{id, name, image_url}] from /spotify/playlists
+  selected: 0,          // index into items
+  scrollTop: 0,         // first visible item index
+  loading: false,
+  loaded: false,        // cached for the session once fetched
+  error: false,
+  flash: '',            // transient overlay: 'PLAYING' | 'ERROR' | ''
+};
+let plRowsBuilt = false;
+let plRowEls = [];
+let playlistFlashTimer = null;
+
+/* Open the Playlists screen (from Mixer / Now Playing). Fetches on first open
+   only; cached thereafter until an explicit refresh (button 2). */
+function openPlaylists() {
+  cancelReturnToNowPlaying();      // don't let the idle timer pull us to NP
+  STATE.view = 'playlists';
+  applyView();                     // renders (possibly the loading overlay)
+  loadPlaylists(false);            // no-op fetch if already cached
+}
+
+/* Back button: Playlists -> Mixer, or Mixer/NowPlaying -> Playlists. */
+function handleBack() {
+  if (STATE.view === 'playlists') {
+    STATE.view = 'mixer';
+    applyView();
+    scheduleReturnToNowPlaying();
+  } else {
+    openPlaylists();
+  }
+}
+
+async function loadPlaylists(force) {
+  if (playlistState.loading) return;
+  if (playlistState.loaded && !force) { renderPlaylists(); return; }
+  playlistState.loading = true;
+  playlistState.error = false;
+  if (STATE.view === 'playlists') renderPlaylists();   // show LOADING
+  try {
+    const r = await fetch(SERVER + '/spotify/playlists', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const arr = await r.json();
+    playlistState.items = Array.isArray(arr) ? arr : [];
+    playlistState.selected = 0;
+    playlistState.scrollTop = 0;
+    playlistState.loaded = true;
+    playlistState.error = false;
+  } catch (e) {
+    console.error('playlists fetch error', e);
+    playlistState.error = true;
+  } finally {
+    playlistState.loading = false;
+    if (STATE.view === 'playlists') renderPlaylists();
+  }
+}
+
+function movePlaylistSelection(dir) {
+  const n = playlistState.items.length;
+  if (!n) return;
+  playlistState.selected = Math.max(0, Math.min(n - 1, playlistState.selected + dir));
+  // Keep the selection inside the visible window.
+  if (playlistState.selected < playlistState.scrollTop) {
+    playlistState.scrollTop = playlistState.selected;
+  } else if (playlistState.selected >= playlistState.scrollTop + PL_VISIBLE_ROWS) {
+    playlistState.scrollTop = playlistState.selected - PL_VISIBLE_ROWS + 1;
+  }
+  renderPlaylists();
+}
+
+function showPlaylistFlash(text) {
+  playlistState.flash = text;
+  if (playlistFlashTimer) { clearTimeout(playlistFlashTimer); playlistFlashTimer = null; }
+  renderPlaylists();
+}
+
+async function playSelectedPlaylist() {
+  const it = playlistState.items[playlistState.selected];
+  if (!it || !it.id) return;
+  showPlaylistFlash('PLAYING');           // immediate confirmation
+  let ok = false;
+  try {
+    // device_name is intentionally omitted — the server uses
+    // spotify_connect_device from presets.json (kept off the device).
+    const r = await fetch(SERVER + '/spotify/play-playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_uri: it.id }),
+    });
+    const j = await r.json().catch(() => ({}));
+    ok = r.ok && j && j.ok === true;
+  } catch (e) {
+    console.error('play-playlist error', e);
+    ok = false;
+  }
+  if (playlistFlashTimer) clearTimeout(playlistFlashTimer);
+  if (ok) {
+    // Hold "PLAYING..." ~2s, then drop back to the mixer (Now Playing follows).
+    playlistFlashTimer = setTimeout(() => {
+      playlistState.flash = '';
+      STATE.view = 'mixer';
+      applyView();
+      scheduleReturnToNowPlaying();
+      pollSpotify();
+    }, 2000);
+  } else {
+    // Show "ERROR" ~2s, then stay on the Playlists screen.
+    showPlaylistFlash('ERROR');
+    playlistFlashTimer = setTimeout(() => { playlistState.flash = ''; renderPlaylists(); }, 2000);
+  }
+}
+
+/* Build the fixed pool of visible row elements once; renders just update them. */
+function buildPlaylistRows() {
+  if (plRowsBuilt) return;
+  const list = document.getElementById('pl-list');
+  list.innerHTML = '';
+  plRowEls = [];
+  for (let i = 0; i < PL_VISIBLE_ROWS; i++) {
+    const row = document.createElement('div');
+    row.className = 'pl-row';
+    const cv = document.createElement('canvas');
+    row.appendChild(cv);
+    // Tap a visible row to select it (parity with the mixer's tap-to-focus).
+    row.addEventListener('click', (function (slot) {
+      return function () {
+        const idx = playlistState.scrollTop + slot;
+        if (idx < playlistState.items.length) {
+          playlistState.selected = idx;
+          renderPlaylists();
+        }
+      };
+    })(i));
+    list.appendChild(row);
+    plRowEls.push({ row: row, cv: cv });
+  }
+  plRowsBuilt = true;
+}
+
+function renderPlaylists() {
+  buildPlaylistRows();
+  renderDotTextFit(document.getElementById('pl-header'), 'PLAYLISTS', 280, 4, '180,180,180', 4, 0.6);
+  renderDotTextFit(document.getElementById('pl-hint-canvas'),
+    '1 PLAY  2 REFRESH  BACK EXIT', 560, 2.4, '120,120,120', 1, 0.6);
+
+  const ps = playlistState;
+  const overlay = document.getElementById('pl-overlay');
+  const list = document.getElementById('pl-list');
+
+  // Overlay (loading / error / empty / play feedback) takes over the list area.
+  let overlayText = '';
+  let overlayColor = '180,180,180';
+  if (ps.flash === 'PLAYING')      { overlayText = 'PLAYING...'; overlayColor = '60,220,90'; }
+  else if (ps.flash === 'ERROR')   { overlayText = 'ERROR';      overlayColor = '220,80,80'; }
+  else if (ps.loading)             { overlayText = 'LOADING...'; overlayColor = '180,180,180'; }
+  else if (ps.error)               { overlayText = 'ERROR  PRESS 2 TO RETRY'; overlayColor = '220,80,80'; }
+  else if (!ps.items.length)       { overlayText = 'NO PLAYLISTS'; overlayColor = '150,150,150'; }
+
+  if (overlayText) {
+    list.style.display = 'none';
+    overlay.style.display = 'flex';
+    renderDotTextFit(document.getElementById('pl-overlay-canvas'), overlayText, 560, 7, overlayColor, 5, 0.9);
+    return;
+  }
+  overlay.style.display = 'none';
+  list.style.display = 'flex';
+
+  for (let i = 0; i < PL_VISIBLE_ROWS; i++) {
+    const idx = ps.scrollTop + i;
+    const slot = plRowEls[i];
+    if (idx >= ps.items.length) {
+      slot.row.style.visibility = 'hidden';
+      slot.row.classList.remove('sel');
+      continue;
+    }
+    slot.row.style.visibility = 'visible';
+    const it = ps.items[idx];
+    const selected = idx === ps.selected;
+    slot.row.classList.toggle('sel', selected);
+    const label = (selected ? '> ' : '  ') + (it.name || 'UNTITLED');
+    const color = selected ? '255,224,154' : '170,170,170';
+    renderDotTextFit(slot.cv, label, 680, selected ? 5 : 4.2, color, selected ? 6 : 2, selected ? 0.95 : 0.7);
+  }
 }
 
 /* =========================================================
@@ -578,12 +815,17 @@ function toggleView() {
 }
 
 function applyView() {
-  document.getElementById('mixer-view').style.display = (STATE.view === 'mixer') ? 'flex' : 'none';
-  document.getElementById('now-playing-view').style.display = (STATE.view === 'np') ? 'flex' : 'none';
+  const v = STATE.view;
+  document.getElementById('mixer-view').style.display = (v === 'mixer') ? 'flex' : 'none';
+  document.getElementById('now-playing-view').style.display = (v === 'np') ? 'flex' : 'none';
+  document.getElementById('playlists-view').style.display = (v === 'playlists') ? 'flex' : 'none';
   document.getElementById('message').style.display = 'none';
-  if (STATE.view === 'np') {
+  if (v === 'np') {
     renderNowPlaying();
     startEQ();
+  } else if (v === 'playlists') {
+    stopEQ();
+    renderPlaylists();
   } else {
     stopEQ();
     renderMixer();
@@ -753,8 +995,31 @@ function stopEQ() {
 /* =========================================================
  *  INPUT (keyboard + hardware websocket)
  * ========================================================= */
+/* Route a scroll detent: scrolls the playlist on the Playlists screen, adjusts
+   volume everywhere else (unchanged mixer/now-playing behavior). */
+function handleScroll(dir) {
+  if (STATE.view === 'playlists') movePlaylistSelection(dir > 0 ? +1 : -1);
+  else adjustVolume(dir > 0 ? +VOL_STEP : -VOL_STEP);
+}
+
 function bindKeyboard() {
   window.addEventListener('keydown', (e) => {
+    // Back button (5th button) — keyboard fallback for desktop testing. Toggles
+    // the Playlists screen. Handled first so it works from any view.
+    if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'm' || e.key === 'M') {
+      e.preventDefault();
+      handleBack();
+      return;
+    }
+    // Playlists screen repurposes 1/2 and the arrows; it never touches the
+    // mixer/now-playing key behavior below.
+    if (STATE.view === 'playlists') {
+      if (e.key === '1')              playSelectedPlaylist();
+      else if (e.key === '2')         loadPlaylists(true);     // refresh
+      else if (e.key === 'ArrowUp')   movePlaylistSelection(-1);
+      else if (e.key === 'ArrowDown') movePlaylistSelection(+1);
+      return;
+    }
     if (e.key === '1' || e.key === '2' || e.key === '3') {
       if (saveArmed) savePreset(e.key);   // SAVE armed → store current mix here
       else activatePreset(e.key);
@@ -767,11 +1032,12 @@ function bindKeyboard() {
   // The Car Thing's rotary dial is a relative wheel encoder (REL_HWHEEL): it has
   // no keyboard handler and isn't on the hardware websocket, so the webview
   // delivers it as a DOM `wheel` event. Use whichever axis is non-zero; one
-  // detent → one volume step (clockwise = louder).
+  // detent → one volume step (clockwise = louder) — or one playlist row on the
+  // Playlists screen.
   window.addEventListener('wheel', (e) => {
     const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    if (d > 0) adjustVolume(+VOL_STEP);
-    else if (d < 0) adjustVolume(-VOL_STEP);
+    if (d > 0) handleScroll(+1);
+    else if (d < 0) handleScroll(-1);
   }, { passive: true });
 
   // SAVE button: arm "save current mix to a preset" (then press 1/2/3).
@@ -815,18 +1081,28 @@ function connectHardwareWS() {
     let msg;
     try { msg = JSON.parse(evt.data); } catch (e) { return; }
     // common shapes: {type:'button', button:1|2|3|4, action:'down'|'up'} or {type:'dial', delta:+1|-1}
+    // The Car Thing's back button arrives either as its own {type:'back'} or as
+    // a 5th button id ({type:'button', button:5}). If yours uses a different id,
+    // change the b === '5' check below (find it with `udevadm`/WS logging).
+    if (msg.type === 'back') { handleBack(); return; }
     if (msg.type === 'button' && (msg.action === 'down' || msg.action === 'short' || !msg.action)) {
       const b = String(msg.button);
+      if (b === '5') { handleBack(); return; }   // 5th / back button → Playlists
+      if (STATE.view === 'playlists') {
+        if (b === '1') playSelectedPlaylist();
+        else if (b === '2') loadPlaylists(true); // refresh
+        return;
+      }
       if (b === '1' || b === '2' || b === '3') activatePreset(b);
       else if (b === '4') toggleView();
     } else if (msg.type === 'dial') {
       const delta = Number(msg.delta) || 0;
-      if (delta > 0) adjustVolume(+0.05);
-      else if (delta < 0) adjustVolume(-0.05);
+      if (delta > 0) handleScroll(+1);
+      else if (delta < 0) handleScroll(-1);
     } else if (msg.type === 'wheel') {
       const delta = Number(msg.delta) || 0;
-      if (delta > 0) adjustVolume(+0.05);
-      else if (delta < 0) adjustVolume(-0.05);
+      if (delta > 0) handleScroll(+1);
+      else if (delta < 0) handleScroll(-1);
     }
   };
 }
@@ -837,6 +1113,7 @@ function connectHardwareWS() {
 function showMessage(text) {
   document.getElementById('mixer-view').style.display = 'none';
   document.getElementById('now-playing-view').style.display = 'none';
+  document.getElementById('playlists-view').style.display = 'none';
   const msg = document.getElementById('message');
   msg.style.display = 'flex';
   document.getElementById('message-text').textContent = text;

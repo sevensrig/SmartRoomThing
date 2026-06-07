@@ -484,8 +484,21 @@ To turn auto-start back off: `sudo systemctl disable volumepresets`.
 | GET    | `/spotify/now-playing` | —                  | Current track JSON, or `{item:null, is_playing:false}` |
 | GET    | `/spotify/art?u=`   | —                     | Proxied album art image (Spotify CDN hosts only) |
 | GET    | `/spotify/token`    | —                     | `{ok, have_token}` (debug: confirms server can mint a token) |
+| GET    | `/spotify/playlists` | —                    | `[{id, name, image_url}]` — the user's saved playlists (live; `id` is the playlist URI). Needs the `playlist-read-private` scope. |
+| GET    | `/spotify/devices`  | —                     | Raw Spotify Connect devices array |
+| POST   | `/spotify/play-playlist` | `{"playlist_uri": "...", "device_name"?: "..."}` | `{ok:true}` — starts the playlist on the named Connect device (defaults to `spotify_connect_device` from config); `404 {"error":"device not found"}` if no match |
+| POST   | `/spotify/play` `/pause` `/next` `/previous` | — | `{ok, status}` — transport controls (resume/pause/skip; `/spotify/play` is unchanged) |
 | GET    | `/auth`             | —                     | One-time Spotify OAuth page (run on the Mac) |
 | GET    | `/`                 | —                     | Car Thing webapp (or auth completion if `?code=`) |
+
+> **Playlists screen & Spotify scope:** the Car Thing's **back button** (5th
+> button) opens a **Playlists** screen — dial scrolls, **button 1** plays the
+> selected playlist on the `spotify_connect_device` (set this in `presets.json`),
+> **button 2** refreshes, back button exits. Reading playlists requires the
+> **`playlist-read-private`** scope, which older tokens don't have — if
+> `/spotify/playlists` returns `502 {"error":"HTTP 403"}`, **re-run the `/auth`
+> flow** (it now requests the playlist scopes) to mint a fresh refresh token and
+> update `spotify_refresh_token` in `presets.json`.
 
 ---
 
@@ -497,9 +510,22 @@ To turn auto-start back off: `sudo systemctl disable volumepresets`.
 | Button 2         | Activate preset 2 (BED)               |
 | Button 3         | Activate preset 3 (AMBIENT)           |
 | Button 4         | Toggle Mixer ↔ Now Playing view       |
-| Dial scroll      | Volume up/down (live faders)          |
+| Back button (5th) | Open the **Playlists** screen (press again to exit to Mixer) |
+| Dial scroll      | Volume up/down (live faders) — or scroll the playlist on the Playlists screen |
 | Tap a fader      | Control just that speaker (~4s, then back to ALL) |
 | Tap **SAVE**, then 1/2/3 | Save the current mix into that preset |
+
+**Playlists screen** (open with the back button): the dial scrolls the list,
+**button 1** plays the highlighted playlist on the Spotify Connect group
+(`spotify_connect_device` in `presets.json`), **button 2** re-fetches the list,
+and the back button returns to the Mixer. Text-only dot-matrix list, cached for
+the session. Desktop testing: `Esc`/`Backspace` acts as the back button, and on
+the Playlists screen `1` plays, `2` refreshes, and ↑/↓ move the selection.
+
+> The back button is read off the hardware websocket as a 5th button id
+> (`{type:'button', button:5}`) or a `{type:'back'}` message. If your Car Thing
+> emits a different id for it, adjust the `b === '5'` check in
+> `connectHardwareWS()` in `car-thing-webapp/index.html`.
 
 By default the dial scales **all speakers together by a fixed ratio** — the
 loudest moves by the step and the rest scale to match, preserving the per-speaker

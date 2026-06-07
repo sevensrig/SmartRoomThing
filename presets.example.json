@@ -4,6 +4,7 @@
   "spotify_client_id": "REPLACE_WITH_SPOTIFY_CLIENT_ID",
   "spotify_client_secret": "REPLACE_WITH_SPOTIFY_CLIENT_SECRET",
   "spotify_refresh_token": "REPLACE_WITH_SPOTIFY_REFRESH_TOKEN",
+  "spotify_connect_device": "Living Room Group",
   "speakers": {
     "nest_audio":  { "ip_address": "10.0.0.50", "name": "Nest Audio" },
     "google_home": { "ip_address": "10.0.0.51", "name": "Google Home" },
