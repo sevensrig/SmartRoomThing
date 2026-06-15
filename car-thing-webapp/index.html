@@ -190,6 +190,15 @@
     border-top: 1px solid #1a1a1a;
   }
 
+  /* TEMP input debugger (remove once the back button is mapped) */
+  #dbg {
+    position: fixed; left: 6px; bottom: 4px; z-index: 999;
+    color: #0f0; opacity: 0.85; font-size: 13px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    pointer-events: none; max-width: 788px;
+    white-space: pre-wrap; word-break: break-all;
+  }
+
   /* shared canvas defaults */
   canvas { image-rendering: pixelated; }
 </style>
@@ -246,6 +255,11 @@
     <div id="pl-hint"><canvas id="pl-hint-canvas"></canvas></div>
   </div>
 
+  <!-- TEMP input debugger: shows the last key / hardware-websocket event, so we
+       can identify the Car Thing's back button. Gated by DEBUG_INPUT; remove
+       this element (and DEBUG_INPUT) once the back button is mapped. -->
+  <div id="dbg"></div>
+
 </div>
 
 <script>
@@ -258,6 +272,17 @@
 // server.) All internet calls (Spotify) are proxied by the Mac.
 const SERVER = 'http://localhost:5005';
 const SPOTIFY_POLL_MS = 5000;
+
+// TEMP: when true, the last keyboard key and hardware-websocket message are
+// shown bottom-left on screen. Used to identify the Car Thing's back button.
+// Set to false (and remove the #dbg element) once the back button is mapped.
+const DEBUG_INPUT = true;
+function dbg(label, data) {
+  if (!DEBUG_INPUT) return;
+  const el = document.getElementById('dbg');
+  if (el) el.textContent = label + ': ' + data;
+  try { console.log('[input]', label, data); } catch (e) {}
+}
 
 // No Spotify credentials or tokens live in (or reach) this webapp. The server
 // (server.py) holds the client ID, secret, and refresh token in presets.json,
@@ -1004,6 +1029,7 @@ function handleScroll(dir) {
 
 function bindKeyboard() {
   window.addEventListener('keydown', (e) => {
+    dbg('key', e.key + ' / code=' + e.code);
     // Back button (5th button) — keyboard fallback for desktop testing. Toggles
     // the Playlists screen. Handled first so it works from any view.
     if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'm' || e.key === 'M') {
@@ -1078,6 +1104,7 @@ function connectHardwareWS() {
   ws.onclose = () => setTimeout(connectHardwareWS, 3000);
   ws.onerror = () => {};
   ws.onmessage = (evt) => {
+    dbg('ws', evt.data);   // TEMP: surface every raw hardware event for mapping
     let msg;
     try { msg = JSON.parse(evt.data); } catch (e) { return; }
     // common shapes: {type:'button', button:1|2|3|4, action:'down'|'up'} or {type:'dial', delta:+1|-1}
