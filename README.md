@@ -447,9 +447,10 @@ To turn auto-start back off: `sudo systemctl disable volumepresets adb-watch`.
   exchange when the redirect lands on `/` with `?code=`). `GET /presets` returns
   only preset/speaker names plus a `spotify_configured` flag — never the HA
   token or Spotify secrets.
-- **`car-thing-webapp/index.html`** — vanilla HTML/JS, no build step. Renders
-  text as 5×7 dot matrix on canvas (scaled to fit the 800×480 screen). Reaches
-  the server at `http://localhost:5005` (USB tunnel). Two views: **Mixer** (live
+- **`car-thing-webapp/index.html`** — vanilla HTML/JS, no build step. Plain DOM
+  text and CSS at 800×480, set in Circular (Spotify's own face, already on the
+  Car Thing image) falling back to Noto Sans. Reaches the server at
+  `http://localhost:5005` (USB tunnel). Two views: **Mixer** (live
   vertical faders, one per speaker — the home screen) and **Now Playing**
   (auto-switches when Spotify is playing). Turning the dial updates the faders
   live; tapping a fader focuses that speaker for individual control (auto-returns
@@ -516,7 +517,7 @@ To turn auto-start back off: `sudo systemctl disable volumepresets adb-watch`.
 **Playlists screen** (open with the back button): the dial scrolls the list,
 **button 1** plays the highlighted playlist on the Spotify Connect group
 (`spotify_connect_device` in `presets.json`), **button 2** re-fetches the list,
-and the back button returns to the Mixer. Text-only dot-matrix list, cached for
+and the back button returns to the Mixer. Text-only list, cached for
 the session. Desktop testing: `Esc`/`Backspace` acts as the back button, and on
 the Playlists screen `1` plays, `2` refreshes, and ↑/↓ move the selection.
 

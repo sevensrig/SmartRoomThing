@@ -2,262 +2,251 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=800, initial-scale=1, user-scalable=no">
-<!-- Don't let the kiosk Chromium serve a stale cached copy after a relaunch. -->
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
+<meta name="viewport" content="width=800, height=480, initial-scale=1, user-scalable=no">
 <title>Volume Presets</title>
 <style>
-  html, body {
-    margin: 0; padding: 0;
-    width: 800px; height: 480px;
-    background: #080808;
-    color: #ddd;
-    overflow: hidden;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    -webkit-user-select: none; user-select: none;
-    cursor: none;
-  }
-  #app { position: relative; width: 800px; height: 480px; }
+/* ===========================================================================
+ * Car Thing UI — 800x480, DPR 1, Chromium 69 on an Amlogic SoC.
+ *
+ * Everything here is plain DOM text and CSS. The previous build drew every
+ * label as a dot-matrix on <canvas> (hundreds of arc() calls per label, plus a
+ * requestAnimationFrame EQ doing ~1700 per frame), which is what made the UI
+ * expensive on this hardware. Text is now laid out by the browser once and only
+ * touched when its content actually changes.
+ *
+ * Chromium 69 constraints: no aspect-ratio, no backdrop-filter, and no flexbox
+ * gap (that landed in 84) — spacing uses margins throughout.
+ * =========================================================================== */
 
-  /* NOTE: the Car Thing's webview is an old Chromium that does NOT support
-     flexbox `gap` or the `inset` shorthand. Spacing/size use margins + explicit
-     dimensions only. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
-  /* --- Message view (shown when setup is incomplete) --- */
-  #message {
-    position: absolute; top: 0; left: 0; width: 800px; height: 480px;
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: #080808;
-    padding: 40px;
-    box-sizing: border-box;
-    text-align: center;
-  }
-  #message #message-text {
-    color: #d4a017; font-size: 20px; line-height: 1.6; letter-spacing: 1px;
-    max-width: 680px;
-  }
+:root {
+  --bg-top:      #1b2836;
+  --bg-bottom:   #0e141b;
+  --card:        #16202c;
+  --text:        #f2f5f8;
+  --text-dim:    #9aa8b6;
+  --text-faint:  #5d6b7a;
+  --accent:      #e8edf2;
+  --track:       #38434f;
+  --fader:       #4a90d9;
+  --fader-focus: #7cb8ff;
+}
 
-  /* shared top bar */
-  .header-bar {
-    height: 42px; display: flex; align-items: center; justify-content: center;
-    border-bottom: 1px solid #1a1a1a; flex-shrink: 0;
-  }
+html, body {
+  width: 800px; height: 480px;
+  overflow: hidden;
+  background: #000;
+  /* Circular is Spotify's own face and ships on the Car Thing image; Noto Sans
+     is the only other real sans installed (everything else falls back to the
+     same default). */
+  font-family: "Circular Sp UI v3 T", "Noto Sans", sans-serif;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: none;
+}
 
-  /* --- Mixer view (vertical faders) --- */
-  #mixer-view {
-    position: absolute; top: 0; left: 0; width: 800px; height: 480px;
-    display: flex; flex-direction: column;
-  }
-  /* SAVE button (top-right) — arms "save current mix to a preset" */
-  #save-btn {
-    position: absolute; top: 8px; right: 12px; z-index: 5;
-    padding: 7px 16px; border-radius: 16px;
-    background: #181818; border: 1px solid #444; color: #aaa;
-    font-size: 13px; letter-spacing: 2px;
-  }
-  #save-btn.armed {
-    background: rgba(212,160,23,0.18); border-color: #d4a017; color: #f0c040;
-  }
-  .faders {
-    flex: 1; display: flex; flex-direction: row;
-    align-items: flex-start; justify-content: space-around;
-    padding: 22px 30px 0; box-sizing: border-box;
-  }
-  .fader {
-    display: flex; flex-direction: column; align-items: center;
-    width: 150px; padding: 8px; box-sizing: border-box;
-    border-radius: 10px;
-    transition: background 0.2s, box-shadow 0.2s;
-  }
-  .fader.focus {
-    background: rgba(212, 160, 23, 0.10);
-    box-shadow: inset 0 0 0 2px rgba(212, 160, 23, 0.7);
-  }
-  .fader-pct  { display: block; margin-bottom: 12px; }
-  .fader-name { display: block; margin-top: 14px; }
-  .fader-track {
-    width: 108px; height: 318px;
-    background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px;
-    box-shadow: inset 0 2px 6px rgba(0,0,0,0.5);
-    display: flex; align-items: flex-end; overflow: hidden;
-  }
-  .fader-fill {
-    width: 100%; height: 0%;
-    background: linear-gradient(to top, #8a6308, #f0c040);
-    box-shadow: 0 0 14px rgba(240, 192, 64, 0.45);
-    transition: height 0.12s ease-out;
-  }
-  .fader.focus .fader-fill {
-    background: linear-gradient(to top, #c9941a, #ffe49a);
-    box-shadow: 0 0 18px rgba(255, 220, 130, 0.6);
-  }
+#app {
+  width: 800px; height: 480px;
+  background: linear-gradient(160deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+  position: relative;
+}
 
-  /* --- Now playing view --- */
-  #now-playing-view {
-    position: absolute; top: 0; left: 0; width: 800px; height: 480px;
-    display: none; flex-direction: column;
-  }
-  .np-body {
-    flex: 1; display: flex; flex-direction: row; align-items: center;
-    padding: 18px 44px; box-sizing: border-box;
-  }
-  .np-art {
-    width: 268px; height: 268px; flex-shrink: 0; margin-right: 56px;
-    background: #111;
-    display: flex; align-items: center; justify-content: center;
-    border: 1px solid #1a1a1a; border-radius: 6px; overflow: hidden;
-  }
-  .np-art img { width: 100%; height: 100%; object-fit: cover; }
-  .np-art .placeholder { color: #444; font-size: 10px; letter-spacing: 3px; }
-  .np-info {
-    flex: 1; align-self: stretch;
-    display: flex; flex-direction: column; justify-content: center;
-    overflow: hidden;
-  }
-  .np-text canvas { display: block; max-width: 100%; }
-  #np-track  { margin-bottom: 24px; }
-  #np-artist { margin-bottom: 18px; }
-  #eq-canvas { display: block; margin-top: 36px; }
-  .np-status { display: flex; align-items: center; margin-top: 32px; }
-  .led-dot {
-    width: 10px; height: 10px; border-radius: 50%; margin-right: 12px;
-    background: #ff3030; box-shadow: 0 0 8px #ff3030;
-  }
-  .led-dot.playing {
-    background: #30ff60; box-shadow: 0 0 8px #30ff60;
-    animation: blink 1.2s infinite;
-  }
-  @keyframes blink {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0.25; }
-  }
+/* ---------- shared chrome ---------- */
+.topbar {
+  height: 56px;
+  display: flex; align-items: center;
+  padding: 0 26px;
+}
+.topbar .tb-side { width: 44px; font-size: 22px; color: var(--text-dim); }
+.topbar .tb-side.right { text-align: right; }
+.topbar .tb-title {
+  flex: 1; text-align: center;
+  font-size: 17px; font-weight: bold;
+  letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--text-dim);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 
-  /* transport controls (bottom of now playing) */
-  .np-controls {
-    height: 88px; flex-shrink: 0;
-    display: flex; flex-direction: row; align-items: center; justify-content: center;
-    border-top: 1px solid #1a1a1a;
-  }
-  .np-btn {
-    width: 62px; height: 62px; border-radius: 50%;
-    background: #181818; border: 1px solid #383838;
-    display: flex; align-items: center; justify-content: center;
-    margin: 0 28px;
-  }
-  .np-btn:active { background: #2c2c2c; }
-  .np-btn.main { width: 72px; height: 72px; border-color: #d4a017; }
-  .np-btn > * + * { margin-left: 4px; }
-  .tri-r { width:0; height:0; border-left:20px solid #e6e6e6; border-top:13px solid transparent; border-bottom:13px solid transparent; }
-  .tri-l { width:0; height:0; border-right:20px solid #e6e6e6; border-top:13px solid transparent; border-bottom:13px solid transparent; }
-  .skip-bar  { width:4px; height:26px; background:#e6e6e6; }
-  .pause-bar { width:7px; height:26px; background:#e6e6e6; }
+.view { display: none; width: 800px; height: 480px; flex-direction: column; }
+.view.active { display: flex; }
 
-  /* --- Playlists view --- */
-  #playlists-view {
-    position: absolute; top: 0; left: 0; width: 800px; height: 480px;
-    display: none; flex-direction: column;
-  }
-  #pl-body { flex: 1; position: relative; overflow: hidden; }
-  /* explicit edges (the old webview lacks the `inset` shorthand) */
-  #pl-list {
-    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-    display: flex; flex-direction: column; align-items: stretch;
-    padding: 14px 40px 0; box-sizing: border-box;
-  }
-  .pl-row {
-    height: 54px; flex-shrink: 0;
-    display: flex; align-items: center;
-    padding: 0 16px; box-sizing: border-box; border-radius: 8px;
-    transition: background 0.15s, box-shadow 0.15s;
-  }
-  .pl-row.sel {
-    background: rgba(212, 160, 23, 0.12);
-    box-shadow: inset 0 0 0 2px rgba(212, 160, 23, 0.6);
-  }
-  .pl-row canvas { display: block; max-width: 100%; }
-  #pl-overlay {
-    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-    display: none; align-items: center; justify-content: center;
-  }
-  #pl-overlay canvas { display: block; }
-  #pl-hint {
-    height: 42px; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    border-top: 1px solid #1a1a1a;
-  }
+/* ---------- now playing ---------- */
+#np-body { flex: 1; display: flex; align-items: center; padding: 0 34px; }
 
-  /* TEMP input debugger (remove once the back button is mapped) */
-  #dbg {
-    position: fixed; left: 6px; bottom: 4px; z-index: 999;
-    color: #0f0; opacity: 0.85; font-size: 13px;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    pointer-events: none; max-width: 788px;
-    white-space: pre-wrap; word-break: break-all;
-  }
+#np-art {
+  width: 268px; height: 268px; flex: none;
+  border-radius: 14px;
+  background: linear-gradient(150deg, #2f4a63, #1d2c3b);
+  background-size: cover; background-position: center;
+  margin-right: 34px;
+  overflow: hidden;
+}
 
-  /* shared canvas defaults */
-  canvas { image-rendering: pixelated; }
+#np-info { flex: 1; min-width: 0; }
+
+#np-title {
+  font-size: 40px; font-weight: bold; line-height: 1.15;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#np-artist {
+  font-size: 23px; color: var(--text-dim);
+  margin-top: 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+#np-progress {
+  height: 6px; border-radius: 3px;
+  background: var(--track);
+  margin-top: 30px;
+  overflow: hidden;
+}
+#np-progress-fill {
+  height: 100%; width: 0%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+#np-times {
+  display: flex; justify-content: space-between;
+  font-size: 15px; color: var(--text-dim);
+  margin-top: 9px;
+}
+
+#np-controls { display: flex; align-items: center; margin-top: 26px; }
+.ctl {
+  width: 74px; height: 58px;
+  display: flex; align-items: center; justify-content: center;
+  margin-right: 26px;
+}
+.ctl svg { fill: var(--text); }
+.ctl:active svg { fill: var(--text-dim); }
+
+/* ---------- mixer ---------- */
+#save-btn {
+  position: absolute; top: 14px; right: 22px;
+  padding: 8px 16px; border-radius: 16px;
+  border: 1px solid var(--text-faint);
+  font-size: 14px; letter-spacing: 1.2px; color: var(--text-dim);
+  z-index: 5;
+}
+#save-btn.armed { border-color: var(--fader-focus); color: var(--fader-focus); }
+
+#faders { flex: 1; display: flex; align-items: flex-end; justify-content: center; padding: 6px 40px 42px; }
+.fader { width: 150px; margin: 0 22px; text-align: center; }
+.fader-pct { font-size: 30px; font-weight: bold; margin-bottom: 12px; }
+.fader-track {
+  height: 232px; border-radius: 10px;
+  background: var(--track);
+  position: relative; overflow: hidden;
+}
+.fader-fill {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: var(--fader);
+  border-radius: 10px;
+}
+.fader.focus .fader-fill { background: var(--fader-focus); }
+.fader-name {
+  font-size: 15px; letter-spacing: 1.6px; color: var(--text-dim);
+  margin-top: 12px;
+}
+.fader.dead { opacity: 0.34; }
+
+/* ---------- playlists ---------- */
+#pl-list { flex: 1; padding: 2px 34px; overflow: hidden; }
+.pl-row {
+  height: 56px; line-height: 56px;
+  padding: 0 18px; border-radius: 10px;
+  font-size: 22px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pl-row.sel { background: rgba(255,255,255,0.10); color: var(--text); font-weight: bold; }
+#pl-hint {
+  height: 44px; line-height: 44px; text-align: center;
+  font-size: 14px; letter-spacing: 1.2px; color: var(--text-faint);
+}
+
+/* ---------- message ---------- */
+#message {
+  display: none;
+  position: absolute; top: 0; left: 0;
+  width: 800px; height: 480px;
+  align-items: center; justify-content: center;
+  padding: 0 70px; text-align: center;
+  background: linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+  font-size: 24px; color: var(--text-dim); line-height: 1.5;
+  z-index: 10;
+}
+
+/* Transient centre overlay (playlist PLAYING / ERROR, saved-preset flash). */
+#toast {
+  display: none;
+  position: absolute; top: 50%; left: 50%;
+  -webkit-transform: translate(-50%, -50%); transform: translate(-50%, -50%);
+  padding: 18px 34px; border-radius: 14px;
+  background: rgba(0,0,0,0.72);
+  font-size: 26px; font-weight: bold; letter-spacing: 1.5px;
+  z-index: 20;
+}
+#toast.show { display: block; }
+
+#dbg {
+  position: fixed; left: 6px; bottom: 4px; z-index: 999;
+  color: #0f0; opacity: 0.85; font-size: 13px;
+  font-family: monospace; pointer-events: none;
+  max-width: 788px; white-space: pre-wrap; word-break: break-all;
+}
 </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- Message screen (shown when Spotify setup is incomplete) -->
-  <div id="message">
-    <div id="message-text"></div>
+  <!-- Now Playing (home screen) -->
+  <div class="view" id="now-playing-view">
+    <div class="topbar">
+      <div class="tb-side">&#9662;</div>
+      <div class="tb-title" id="np-context">Now Playing</div>
+      <div class="tb-side right">&#8943;</div>
+    </div>
+    <div id="np-body">
+      <div id="np-art"></div>
+      <div id="np-info">
+        <div id="np-title">Nothing playing</div>
+        <div id="np-artist"></div>
+        <div id="np-progress"><div id="np-progress-fill"></div></div>
+        <div id="np-times"><span id="np-elapsed">0:00</span><span id="np-remain">-0:00</span></div>
+        <div id="np-controls">
+          <div class="ctl" id="btn-prev">
+            <svg width="34" height="34" viewBox="0 0 24 24"><path d="M6 5h2.5v14H6zM20 5v14L9.5 12z"/></svg>
+          </div>
+          <div class="ctl" id="btn-playpause">
+            <svg width="40" height="40" viewBox="0 0 24 24" id="pp-icon"><path d="M7 4h4v16H7zM13 4h4v16h-4z"/></svg>
+          </div>
+          <div class="ctl" id="btn-next">
+            <svg width="34" height="34" viewBox="0 0 24 24"><path d="M15.5 5H18v14h-2.5zM4 5l10.5 7L4 19z"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- Mixer view (live vertical faders) -->
-  <div id="mixer-view">
+  <!-- Mixer -->
+  <div class="view" id="mixer-view">
     <div id="save-btn">SAVE</div>
-    <div class="header-bar"><canvas id="mix-header"></canvas></div>
-    <div class="faders" id="faders"></div>
+    <div class="topbar"><div class="tb-side"></div><div class="tb-title" id="mix-header">Volume</div><div class="tb-side right"></div></div>
+    <div id="faders"></div>
   </div>
 
-  <!-- Now playing view -->
-  <div id="now-playing-view">
-    <div class="header-bar"><canvas id="np-header-canvas"></canvas></div>
-    <div class="np-body">
-      <div class="np-art" id="np-art">
-        <div class="placeholder">NO ART</div>
-      </div>
-      <div class="np-info">
-        <div class="np-text">
-          <canvas id="np-track"></canvas>
-          <canvas id="np-artist"></canvas>
-          <canvas id="np-album"></canvas>
-        </div>
-        <canvas id="eq-canvas"></canvas>
-        <div class="np-status">
-          <div class="led-dot" id="np-led"></div>
-          <canvas id="np-state"></canvas>
-        </div>
-      </div>
-    </div>
-    <div class="np-controls">
-      <div class="np-btn" id="btn-prev"><span class="skip-bar"></span><span class="tri-l"></span></div>
-      <div class="np-btn main" id="btn-playpause"></div>
-      <div class="np-btn" id="btn-next"><span class="tri-r"></span><span class="skip-bar"></span></div>
-    </div>
+  <!-- Playlists -->
+  <div class="view" id="playlists-view">
+    <div class="topbar"><div class="tb-side">&#9662;</div><div class="tb-title">Playlists</div><div class="tb-side right"></div></div>
+    <div id="pl-list"></div>
+    <div id="pl-hint">DIAL SCROLL &nbsp;·&nbsp; 1 PLAY &nbsp;·&nbsp; 2 REFRESH &nbsp;·&nbsp; BACK EXIT</div>
   </div>
 
-  <!-- Playlists view (dial scrolls, button 1 plays, button 2 refreshes) -->
-  <div id="playlists-view">
-    <div class="header-bar"><canvas id="pl-header"></canvas></div>
-    <div id="pl-body">
-      <div id="pl-list"></div>
-      <div id="pl-overlay"><canvas id="pl-overlay-canvas"></canvas></div>
-    </div>
-    <div id="pl-hint"><canvas id="pl-hint-canvas"></canvas></div>
-  </div>
-
-  <!-- TEMP input debugger: shows the last key / hardware-websocket event, so we
-       can identify the Car Thing's back button. Gated by DEBUG_INPUT; remove
-       this element (and DEBUG_INPUT) once the back button is mapped. -->
+  <div id="toast"></div>
+  <div id="message"><div id="message-text"></div></div>
   <div id="dbg"></div>
 
 </div>
@@ -266,154 +255,21 @@
 /* =========================================================
  *  CONFIG
  * ========================================================= */
-// The Car Thing has no network of its own — it reaches the Mac server over USB
-// via `adb reverse tcp:5005 tcp:5005`, so the server is at the device's own
-// localhost. (monitor_watch.sh sets up the reverse tunnel when it starts the
-// server.) All internet calls (Spotify) are proxied by the Mac.
 const SERVER = 'http://localhost:5005';
 const SPOTIFY_POLL_MS = 5000;
+const STATUS_POLL_MS = 4000;
 
-// TEMP: when true, the last keyboard key and hardware-websocket message are
-// shown bottom-left on screen. Used to identify the Car Thing's back button.
-// Set to false (and remove the #dbg element) once the back button is mapped.
+// Set true to print the last key / hardware-websocket event bottom-left; used to
+// identify the Car Thing's back button.
 const DEBUG_INPUT = false;
 function dbg(label, data) {
   if (!DEBUG_INPUT) return;
   const el = document.getElementById('dbg');
   if (el) el.textContent = label + ': ' + data;
-  try { console.log('[input]', label, data); } catch (e) {}
 }
 
-// No Spotify credentials or tokens live in (or reach) this webapp. The server
-// (server.py) holds the client ID, secret, and refresh token in presets.json,
-// and fully proxies Spotify: /spotify/now-playing for the track and
-// /spotify/art for album art. Set up Spotify once on the Mac at
-// http://127.0.0.1:5005/auth.
-
-/* =========================================================
- *  5x7 DOT MATRIX FONT (do not modify)
- * ========================================================= */
-var F={
-'A':['01110','10001','10001','11111','10001','10001','10001'],
-'B':['11110','10001','10001','11110','10001','10001','11110'],
-'C':['01110','10001','10000','10000','10000','10001','01110'],
-'D':['11110','10001','10001','10001','10001','10001','11110'],
-'E':['11111','10000','10000','11110','10000','10000','11111'],
-'F':['11111','10000','10000','11110','10000','10000','10000'],
-'G':['01110','10001','10000','10111','10001','10001','01110'],
-'H':['10001','10001','10001','11111','10001','10001','10001'],
-'I':['01110','00100','00100','00100','00100','00100','01110'],
-'J':['00111','00010','00010','00010','00010','10010','01100'],
-'K':['10001','10010','10100','11000','10100','10010','10001'],
-'L':['10000','10000','10000','10000','10000','10000','11111'],
-'M':['10001','11011','10101','10101','10001','10001','10001'],
-'N':['10001','10001','11001','10101','10011','10001','10001'],
-'O':['01110','10001','10001','10001','10001','10001','01110'],
-'P':['11110','10001','10001','11110','10000','10000','10000'],
-'Q':['01110','10001','10001','10001','10101','10010','01101'],
-'R':['11110','10001','10001','11110','10100','10010','10001'],
-'S':['01110','10001','10000','01110','00001','10001','01110'],
-'T':['11111','00100','00100','00100','00100','00100','00100'],
-'U':['10001','10001','10001','10001','10001','10001','01110'],
-'V':['10001','10001','10001','10001','01010','01010','00100'],
-'W':['10001','10001','10001','10101','10101','10101','01010'],
-'X':['10001','10001','01010','00100','01010','10001','10001'],
-'Y':['10001','10001','01010','00100','00100','00100','00100'],
-'Z':['11111','00001','00010','00100','01000','10000','11111'],
-'a':['00000','00000','01110','00001','01111','10001','01111'],
-'b':['10000','10000','10110','11001','10001','10001','11110'],
-'c':['00000','00000','01110','10000','10000','10001','01110'],
-'d':['00001','00001','01101','10011','10001','10001','01111'],
-'e':['00000','00000','01110','10001','11111','10000','01110'],
-'f':['00110','01001','01000','11100','01000','01000','01000'],
-'g':['00000','00000','01111','10001','01111','00001','01110'],
-'h':['10000','10000','10110','11001','10001','10001','10001'],
-'i':['00100','00000','01100','00100','00100','00100','01110'],
-'j':['00010','00000','00110','00010','00010','10010','01100'],
-'k':['10000','10000','10010','10100','11000','10100','10010'],
-'l':['01100','00100','00100','00100','00100','00100','01110'],
-'m':['00000','00000','11010','10101','10101','10001','10001'],
-'n':['00000','00000','10110','11001','10001','10001','10001'],
-'o':['00000','00000','01110','10001','10001','10001','01110'],
-'p':['00000','00000','11110','10001','11110','10000','10000'],
-'q':['00000','00000','01101','10011','01111','00001','00001'],
-'r':['00000','00000','10110','11001','10000','10000','10000'],
-'s':['00000','00000','01110','10000','01110','00001','11110'],
-'t':['01000','01000','11100','01000','01000','01001','00110'],
-'u':['00000','00000','10001','10001','10001','10011','01101'],
-'v':['00000','00000','10001','10001','10001','01010','00100'],
-'w':['00000','00000','10001','10001','10101','10101','01010'],
-'x':['00000','00000','10001','01010','00100','01010','10001'],
-'y':['00000','00000','10001','10001','01111','00001','01110'],
-'z':['00000','00000','11111','00010','00100','01000','11111'],
-'0':['01110','10001','10011','10101','11001','10001','01110'],
-'1':['00100','01100','00100','00100','00100','00100','01110'],
-'2':['01110','10001','00001','00010','00100','01000','11111'],
-'3':['01110','10001','00001','00110','00001','10001','01110'],
-'4':['00010','00110','01010','10010','11111','00010','00010'],
-'5':['11111','10000','11110','00001','00001','10001','01110'],
-'6':['00110','01000','10000','11110','10001','10001','01110'],
-'7':['11111','00001','00010','00100','01000','01000','01000'],
-'8':['01110','10001','10001','01110','10001','10001','01110'],
-'9':['01110','10001','10001','01111','00001','00010','01100'],
-' ':['00000','00000','00000','00000','00000','00000','00000'],
-'.':['00000','00000','00000','00000','00000','00000','00100'],
-',':['00000','00000','00000','00000','00000','00100','01000'],
-'!':['00100','00100','00100','00100','00100','00000','00100'],
-'?':['01110','10001','00001','00110','00100','00000','00100'],
-'-':['00000','00000','00000','11111','00000','00000','00000'],
-"'":['00100','00100','01000','00000','00000','00000','00000'],
-':':['00000','00100','00000','00000','00000','00100','00000'],
-'/':['00001','00010','00010','00100','01000','01000','10000'],
-};
-
-function renderDotText(canvasEl, text, dotSz, gap, color, glow, bright) {
-  var cW=5,cH=7,sp=1;
-  var totalW=text.length*(cW+sp)-sp;
-  if(totalW<=0)return;
-  var pW=totalW*(dotSz+gap)-gap, pH=cH*(dotSz+gap)-gap;
-  if(pW<=0||pH<=0)return;
-  pW=Math.min(4000,pW);
-  canvasEl.width=pW; canvasEl.height=pH;
-  canvasEl.style.width=pW+'px'; canvasEl.style.height=pH+'px';
-  var ctx=canvasEl.getContext('2d');
-  ctx.clearRect(0,0,pW,pH);
-  var offX=0;
-  for(var ci=0;ci<text.length;ci++){
-    var ch=text[ci], gl=F[ch]||F[' '];
-    for(var row=0;row<cH;row++){
-      if(!gl[row])continue;
-      for(var col=0;col<cW;col++){
-        var px=offX+col*(dotSz+gap), py=row*(dotSz+gap);
-        if(px>pW)break;
-        if(gl[row][col]==='1'){
-          if(glow>0){ctx.shadowColor='rgba('+color+','+glow+')';ctx.shadowBlur=dotSz*2.5;}
-          ctx.fillStyle='rgba('+color+','+bright+')';
-          ctx.beginPath();ctx.arc(px+dotSz/2,py+dotSz/2,dotSz/2,0,Math.PI*2);ctx.fill();
-          ctx.shadowBlur=0;
-        } else {
-          ctx.fillStyle='rgba(255,255,255,0.04)';
-          ctx.beginPath();ctx.arc(px+dotSz/2,py+dotSz/2,dotSz/2,0,Math.PI*2);ctx.fill();
-        }
-      }
-    }
-    offX+=(cW+sp)*(dotSz+gap);
-  }
-}
-
-/* Normalize text into the font's supported character set. */
-function sanitizeText(s) {
-  if (!s) return '';
-  s = s.toString();
-  let out = '';
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (F[ch]) out += ch;
-    else if (ch === '\n' || ch === '\t') out += ' ';
-    else out += ' ';
-  }
-  return out;
-}
+// No Spotify credentials reach this webapp. server.py holds the client id,
+// secret and refresh token in presets.json and proxies every Spotify call.
 
 /* =========================================================
  *  STATE
@@ -421,36 +277,50 @@ function sanitizeText(s) {
 const STATE = {
   config: null,           // /presets payload
   activePreset: null,
-  view: 'np',             // 'mixer' | 'np' — Now Playing is the home screen
+  view: 'np',             // 'mixer' | 'np' | 'playlists' — Now Playing is home
   volumes: {},            // live per-speaker volumes (0..1)
   unavailable: {},        // speaker key -> reason the server can't drive it
   focus: null,            // speaker key the dial controls, or null = ALL
   spotify: {
-    track: null,
-    artist: null,
-    album: null,
-    artUrl: null,
-    playing: false,
+    track: null, artist: null, album: null, artUrl: null, playing: false,
+    progressMs: 0, durationMs: 0, at: 0,   // for the local progress ticker
   },
 };
+
 const SPEAKER_ORDER = ['nest_audio', 'google_home', 'chromecast'];
-const VOL_STEP = 0.05;    // per dial detent / arrow key
+const SPEAKER_LABELS = { nest_audio: 'NEST', google_home: 'HOME', chromecast: 'CAST' };
+const VOL_STEP = 0.05;      // per dial detent / arrow key
 const NP_RETURN_MS = 12000; // idle delay before the mixer reverts to Now Playing
 const SAVE_ARM_MS = 6000;   // how long "save" stays armed waiting for a preset
+
 let focusTimer = null;
 let npReturnTimer = null;
 let mixerBuilt = false;
-let saveArmed = false;      // when true, pressing 1/2/3 SAVES instead of activates
+let saveArmed = false;
 let saveArmTimer = null;
-let savedFlash = '';        // transient "SAVED -> NAME" header message
-let savedFlashTimer = null;
 
-/* Now Playing is home: after the mixer is idle for a bit, return to it. */
+/* Only touch the DOM when a value actually changed — on this SoC a redundant
+   textContent write still costs a style recalc. */
+function setText(el, s) { if (el && el.textContent !== s) el.textContent = s; }
+
+let toastTimer = null;
+function showToast(text, ms) {
+  const el = document.getElementById('toast');
+  el.textContent = text;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  if (ms) toastTimer = setTimeout(hideToast, ms);
+}
+function hideToast() {
+  document.getElementById('toast').classList.remove('show');
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+}
+
 function scheduleReturnToNowPlaying() {
   if (npReturnTimer) clearTimeout(npReturnTimer);
   npReturnTimer = setTimeout(() => {
     npReturnTimer = null;
-    if (STATE.view !== 'np') { STATE.view = 'np'; applyView(); }
+    if (STATE.view === 'mixer') { STATE.view = 'np'; applyView(); }
   }, NP_RETURN_MS);
 }
 function cancelReturnToNowPlaying() {
@@ -458,204 +328,11 @@ function cancelReturnToNowPlaying() {
 }
 
 /* =========================================================
- *  PLAYLISTS SCREEN
- *  Opened with the back button (see input handlers). The dial scrolls the
- *  selection, button 1 plays the selected playlist on the Spotify Connect
- *  device (server reads the target from presets.json), button 2 re-fetches.
- *  Same dot-matrix canvas rendering as the rest of the UI — text only.
- * ========================================================= */
-const PL_VISIBLE_ROWS = 6;        // rows drawn at once (list scrolls within)
-const playlistState = {
-  items: [],            // [{id, name, image_url}] from /spotify/playlists
-  selected: 0,          // index into items
-  scrollTop: 0,         // first visible item index
-  loading: false,
-  loaded: false,        // cached for the session once fetched
-  error: false,
-  flash: '',            // transient overlay: 'PLAYING' | 'ERROR' | ''
-};
-let plRowsBuilt = false;
-let plRowEls = [];
-let playlistFlashTimer = null;
-
-/* Open the Playlists screen (from Mixer / Now Playing). Fetches on first open
-   only; cached thereafter until an explicit refresh (button 2). */
-function openPlaylists() {
-  cancelReturnToNowPlaying();      // don't let the idle timer pull us to NP
-  STATE.view = 'playlists';
-  applyView();                     // renders (possibly the loading overlay)
-  loadPlaylists(false);            // no-op fetch if already cached
-}
-
-/* Back button: Playlists -> Mixer, or Mixer/NowPlaying -> Playlists. */
-function handleBack() {
-  if (STATE.view === 'playlists') {
-    STATE.view = 'mixer';
-    applyView();
-    scheduleReturnToNowPlaying();
-  } else {
-    openPlaylists();
-  }
-}
-
-async function loadPlaylists(force) {
-  if (playlistState.loading) return;
-  if (playlistState.loaded && !force) { renderPlaylists(); return; }
-  playlistState.loading = true;
-  playlistState.error = false;
-  if (STATE.view === 'playlists') renderPlaylists();   // show LOADING
-  try {
-    const r = await fetch(SERVER + '/spotify/playlists', { cache: 'no-store' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const arr = await r.json();
-    playlistState.items = Array.isArray(arr) ? arr : [];
-    playlistState.selected = 0;
-    playlistState.scrollTop = 0;
-    playlistState.loaded = true;
-    playlistState.error = false;
-  } catch (e) {
-    console.error('playlists fetch error', e);
-    playlistState.error = true;
-  } finally {
-    playlistState.loading = false;
-    if (STATE.view === 'playlists') renderPlaylists();
-  }
-}
-
-function movePlaylistSelection(dir) {
-  const n = playlistState.items.length;
-  if (!n) return;
-  playlistState.selected = Math.max(0, Math.min(n - 1, playlistState.selected + dir));
-  // Keep the selection inside the visible window.
-  if (playlistState.selected < playlistState.scrollTop) {
-    playlistState.scrollTop = playlistState.selected;
-  } else if (playlistState.selected >= playlistState.scrollTop + PL_VISIBLE_ROWS) {
-    playlistState.scrollTop = playlistState.selected - PL_VISIBLE_ROWS + 1;
-  }
-  renderPlaylists();
-}
-
-function showPlaylistFlash(text) {
-  playlistState.flash = text;
-  if (playlistFlashTimer) { clearTimeout(playlistFlashTimer); playlistFlashTimer = null; }
-  renderPlaylists();
-}
-
-async function playSelectedPlaylist() {
-  const it = playlistState.items[playlistState.selected];
-  if (!it || !it.id) return;
-  showPlaylistFlash('PLAYING');           // immediate confirmation
-  let ok = false;
-  try {
-    // device_name is intentionally omitted — the server uses
-    // spotify_connect_device from presets.json (kept off the device).
-    const r = await fetch(SERVER + '/spotify/play-playlist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playlist_uri: it.id }),
-    });
-    const j = await r.json().catch(() => ({}));
-    ok = r.ok && j && j.ok === true;
-  } catch (e) {
-    console.error('play-playlist error', e);
-    ok = false;
-  }
-  if (playlistFlashTimer) clearTimeout(playlistFlashTimer);
-  if (ok) {
-    // Hold "PLAYING..." ~2s, then drop back to the mixer (Now Playing follows).
-    playlistFlashTimer = setTimeout(() => {
-      playlistState.flash = '';
-      STATE.view = 'mixer';
-      applyView();
-      scheduleReturnToNowPlaying();
-      pollSpotify();
-    }, 2000);
-  } else {
-    // Show "ERROR" ~2s, then stay on the Playlists screen.
-    showPlaylistFlash('ERROR');
-    playlistFlashTimer = setTimeout(() => { playlistState.flash = ''; renderPlaylists(); }, 2000);
-  }
-}
-
-/* Build the fixed pool of visible row elements once; renders just update them. */
-function buildPlaylistRows() {
-  if (plRowsBuilt) return;
-  const list = document.getElementById('pl-list');
-  list.innerHTML = '';
-  plRowEls = [];
-  for (let i = 0; i < PL_VISIBLE_ROWS; i++) {
-    const row = document.createElement('div');
-    row.className = 'pl-row';
-    const cv = document.createElement('canvas');
-    row.appendChild(cv);
-    // Tap a visible row to select it (parity with the mixer's tap-to-focus).
-    row.addEventListener('click', (function (slot) {
-      return function () {
-        const idx = playlistState.scrollTop + slot;
-        if (idx < playlistState.items.length) {
-          playlistState.selected = idx;
-          renderPlaylists();
-        }
-      };
-    })(i));
-    list.appendChild(row);
-    plRowEls.push({ row: row, cv: cv });
-  }
-  plRowsBuilt = true;
-}
-
-function renderPlaylists() {
-  buildPlaylistRows();
-  renderDotTextFit(document.getElementById('pl-header'), 'PLAYLISTS', 280, 4, '180,180,180', 4, 0.6);
-  renderDotTextFit(document.getElementById('pl-hint-canvas'),
-    '1 PLAY  2 REFRESH  BACK EXIT', 560, 2.4, '120,120,120', 1, 0.6);
-
-  const ps = playlistState;
-  const overlay = document.getElementById('pl-overlay');
-  const list = document.getElementById('pl-list');
-
-  // Overlay (loading / error / empty / play feedback) takes over the list area.
-  let overlayText = '';
-  let overlayColor = '180,180,180';
-  if (ps.flash === 'PLAYING')      { overlayText = 'PLAYING...'; overlayColor = '60,220,90'; }
-  else if (ps.flash === 'ERROR')   { overlayText = 'ERROR';      overlayColor = '220,80,80'; }
-  else if (ps.loading)             { overlayText = 'LOADING...'; overlayColor = '180,180,180'; }
-  else if (ps.error)               { overlayText = 'ERROR  PRESS 2 TO RETRY'; overlayColor = '220,80,80'; }
-  else if (!ps.items.length)       { overlayText = 'NO PLAYLISTS'; overlayColor = '150,150,150'; }
-
-  if (overlayText) {
-    list.style.display = 'none';
-    overlay.style.display = 'flex';
-    renderDotTextFit(document.getElementById('pl-overlay-canvas'), overlayText, 560, 7, overlayColor, 5, 0.9);
-    return;
-  }
-  overlay.style.display = 'none';
-  list.style.display = 'flex';
-
-  for (let i = 0; i < PL_VISIBLE_ROWS; i++) {
-    const idx = ps.scrollTop + i;
-    const slot = plRowEls[i];
-    if (idx >= ps.items.length) {
-      slot.row.style.visibility = 'hidden';
-      slot.row.classList.remove('sel');
-      continue;
-    }
-    slot.row.style.visibility = 'visible';
-    const it = ps.items[idx];
-    const selected = idx === ps.selected;
-    slot.row.classList.toggle('sel', selected);
-    const label = (selected ? '> ' : '  ') + (it.name || 'UNTITLED');
-    const color = selected ? '255,224,154' : '170,170,170';
-    renderDotTextFit(slot.cv, label, 680, selected ? 5 : 4.2, color, selected ? 6 : 2, selected ? 0.95 : 0.7);
-  }
-}
-
-/* =========================================================
- *  CONFIG FETCH
+ *  SERVER
  * ========================================================= */
 async function fetchConfig() {
   // Throws on failure so init() can retry — at boot the USB tunnel may not be
-  // up yet, and we must not mistake "server unreachable" for "not configured".
+  // up yet, and "server unreachable" must not be read as "not configured".
   const r = await fetch(SERVER + '/presets', { cache: 'no-store' });
   if (!r.ok) throw new Error('presets HTTP ' + r.status);
   STATE.config = await r.json();
@@ -672,86 +349,74 @@ async function fetchStatus() {
 }
 
 /* =========================================================
- *  MIXER VIEW (live vertical faders)
+ *  VIEWS
  * ========================================================= */
-const SPEAKER_LABELS = { nest_audio: 'NEST', google_home: 'HOME', chromecast: 'CAST' };
-
-/* Render dot-matrix text scaled to fit within maxW px (prevents overflow). */
-function renderDotTextFit(cv, text, maxW, maxDot, color, glow, bright) {
-  text = sanitizeText(text);
-  const n = Math.max(1, text.length);
-  const gapRatio = 0.25;
-  let dot = maxW / (n * 6 * (1 + gapRatio));
-  dot = Math.max(1, Math.min(maxDot, dot));
-  renderDotText(cv, text, dot, dot * gapRatio, color, glow, bright);
+function applyView() {
+  const v = STATE.view;
+  document.getElementById('now-playing-view').classList.toggle('active', v === 'np');
+  document.getElementById('mixer-view').classList.toggle('active', v === 'mixer');
+  document.getElementById('playlists-view').classList.toggle('active', v === 'playlists');
+  document.getElementById('message').style.display = 'none';
+  if (v === 'mixer') renderMixer();
+  else if (v === 'np') renderNowPlaying();
+  else renderPlaylists();
 }
 
-/* Build the three fader elements once; later calls just update them. */
+function toggleView() {
+  STATE.view = (STATE.view === 'mixer') ? 'np' : 'mixer';
+  applyView();
+  if (STATE.view === 'mixer') scheduleReturnToNowPlaying();
+  else cancelReturnToNowPlaying();
+}
+
+/* =========================================================
+ *  MIXER
+ * ========================================================= */
 function buildFaders() {
   if (mixerBuilt) return;
   const wrap = document.getElementById('faders');
   wrap.innerHTML = '';
-  for (const sp of SPEAKER_ORDER) {
-    const fader = document.createElement('div');
-    fader.className = 'fader';
-    fader.dataset.sp = sp;
-    const pct = document.createElement('canvas'); pct.className = 'fader-pct';
-    const track = document.createElement('div'); track.className = 'fader-track';
-    const fill = document.createElement('div'); fill.className = 'fader-fill';
-    const name = document.createElement('canvas'); name.className = 'fader-name';
-    track.appendChild(fill);
-    fader.appendChild(pct); fader.appendChild(track); fader.appendChild(name);
-    fader.addEventListener('click', () => focusDevice(sp));
-    wrap.appendChild(fader);
-  }
+  SPEAKER_ORDER.forEach((sp) => {
+    const f = document.createElement('div');
+    f.className = 'fader';
+    f.dataset.sp = sp;
+    f.innerHTML =
+      '<div class="fader-pct"></div>' +
+      '<div class="fader-track"><div class="fader-fill"></div></div>' +
+      '<div class="fader-name"></div>';
+    f.addEventListener('click', () => focusDevice(sp));
+    wrap.appendChild(f);
+  });
   mixerBuilt = true;
 }
 
 function renderMixer() {
   buildFaders();
-
-  // Header reflects save-mode / what the dial currently controls.
-  const presets = (STATE.config && STATE.config.presets) || {};
-  const ap = STATE.activePreset && presets[STATE.activePreset];
-  let title, color, glow, bright;
-  if (savedFlash) {
-    title = savedFlash;
-    color = '60,220,90'; glow = 7; bright = 0.95;
-  } else if (saveArmed) {
-    title = 'SAVE TO 1 2 3';
-    color = '212,160,23'; glow = 7; bright = 0.95;
-  } else if (STATE.focus) {
-    title = (SPEAKER_LABELS[STATE.focus] || 'DEVICE') + ' VOL';
-    color = '212,160,23'; glow = 7; bright = 0.95;
-  } else if (ap) {
-    title = sanitizeText(ap.name);
-    color = '212,160,23'; glow = 6; bright = 0.9;
-  } else {
-    title = 'VOLUME';
-    color = '180,180,180'; glow = 4; bright = 0.7;
+  let title = 'Volume';
+  if (saveArmed) title = 'Save to 1 / 2 / 3';
+  else if (STATE.focus) title = SPEAKER_LABELS[STATE.focus] || STATE.focus;
+  else if (STATE.activePreset && STATE.config && STATE.config.presets) {
+    const p = STATE.config.presets[STATE.activePreset];
+    if (p && p.name) title = p.name;
   }
-  renderDotTextFit(document.getElementById('mix-header'), title, 420, 5, color, glow, bright);
-  const sb = document.getElementById('save-btn');
-  if (sb) sb.classList.toggle('armed', saveArmed);
+  setText(document.getElementById('mix-header'), title);
+  document.getElementById('save-btn').classList.toggle('armed', saveArmed);
 
-  // Faders
-  document.querySelectorAll('#faders .fader').forEach((fader) => {
-    const sp = fader.dataset.sp;
+  const faders = document.querySelectorAll('#faders .fader');
+  for (let i = 0; i < faders.length; i++) {
+    const f = faders[i];
+    const sp = f.dataset.sp;
     const v = Math.max(0, Math.min(1, STATE.volumes[sp] || 0));
-    const focused = STATE.focus === sp;
     // The server reports speakers it can't drive (offline, or a TV that isn't
-    // casting). Draw those dimmed so the dial visibly does nothing, rather than
-    // looking live while every turn is silently discarded.
+    // casting). Dim those so the dial visibly does nothing on them, rather than
+    // looking live while every turn is discarded.
     const dead = !!STATE.unavailable[sp];
-    fader.classList.toggle('focus', focused && !dead);
-    fader.style.opacity = dead ? '0.35' : '1';
-    fader.querySelector('.fader-fill').style.height = (v * 100) + '%';
-    const c = dead ? '120,120,120' : (focused ? '255,224,154' : '230,200,120');
-    const pct = dead ? '--' : String(Math.round(v * 100));
-    renderDotTextFit(fader.querySelector('.fader-pct'), pct, 84, 5, c, (focused && !dead) ? 6 : 3, 0.95);
-    renderDotTextFit(fader.querySelector('.fader-name'), SPEAKER_LABELS[sp] || sp, 110, 3,
-                     dead ? '110,110,110' : '160,160,160', 2, 0.65);
-  });
+    f.classList.toggle('dead', dead);
+    f.classList.toggle('focus', STATE.focus === sp && !dead);
+    f.querySelector('.fader-fill').style.height = (v * 100) + '%';
+    setText(f.querySelector('.fader-pct'), dead ? '--' : String(Math.round(v * 100)));
+    setText(f.querySelector('.fader-name'), SPEAKER_LABELS[sp] || sp);
+  }
 }
 
 function focusDevice(sp) {
@@ -761,66 +426,52 @@ function focusDevice(sp) {
   renderMixer();
 }
 
-/* Auto-return to ALL a few seconds after the last individual interaction. */
 function armFocusTimeout() {
   if (focusTimer) clearTimeout(focusTimer);
   focusTimer = setTimeout(() => { STATE.focus = null; renderMixer(); }, 4000);
 }
 
-/* =========================================================
- *  ACTIONS
- * ========================================================= */
 async function activatePreset(id) {
-  STATE.focus = null;
-  if (focusTimer) clearTimeout(focusTimer);
   try {
     const r = await fetch(SERVER + '/preset/' + id, { method: 'POST' });
     const j = await r.json();
-    if (j && j.ok) {
-      STATE.activePreset = id;
-      if (j.volumes) STATE.volumes = j.volumes;
-      if (STATE.view !== 'mixer') { STATE.view = 'mixer'; applyView(); }
-      else renderMixer();
-      scheduleReturnToNowPlaying();
-    } else {
-      console.error('preset activation failed', j);
-    }
-  } catch (e) {
-    console.error('preset activation error', e);
-  }
+    if (j && j.volumes) STATE.volumes = j.volumes;
+    STATE.activePreset = id;
+  } catch (e) { console.error('preset error', e); }
+  if (STATE.view !== 'mixer') { STATE.view = 'mixer'; applyView(); }
+  else renderMixer();
+  scheduleReturnToNowPlaying();
 }
 
-/* --- Save current mix to a preset ------------------------------------- */
 function armSave() {
-  saveArmed = !saveArmed;          // tapping SAVE toggles
+  saveArmed = !saveArmed;
   if (saveArmTimer) clearTimeout(saveArmTimer);
-  if (saveArmed) {
-    saveArmTimer = setTimeout(() => { saveArmed = false; renderMixer(); }, SAVE_ARM_MS);
-    scheduleReturnToNowPlaying();
-  }
+  if (saveArmed) saveArmTimer = setTimeout(() => { saveArmed = false; renderMixer(); }, SAVE_ARM_MS);
+  scheduleReturnToNowPlaying();
   renderMixer();
 }
 
 async function savePreset(id) {
   saveArmed = false;
-  if (saveArmTimer) clearTimeout(saveArmTimer);
+  if (saveArmTimer) { clearTimeout(saveArmTimer); saveArmTimer = null; }
   try {
     const r = await fetch(SERVER + '/preset/' + id + '/save', { method: 'POST' });
     const j = await r.json();
     if (j && j.ok) {
-      STATE.activePreset = id;
       if (STATE.config && STATE.config.presets && STATE.config.presets[id] && j.levels) {
-        Object.assign(STATE.config.presets[id], j.levels);  // keep local config in sync
+        Object.assign(STATE.config.presets[id], j.levels);
       }
-      savedFlash = 'SAVED ' + (j.preset || '');
-      if (savedFlashTimer) clearTimeout(savedFlashTimer);
-      savedFlashTimer = setTimeout(() => { savedFlash = ''; renderMixer(); }, 1800);
-      scheduleReturnToNowPlaying();
+      showToast('SAVED  ' + ((j.preset || '').toUpperCase() || id), 1800);
+      STATE.activePreset = id;
     }
   } catch (e) { console.error('save preset error', e); }
+  scheduleReturnToNowPlaying();
   renderMixer();
 }
 
+/* =========================================================
+ *  VOLUME
+ * ========================================================= */
 // One request in flight at a time. The dial can emit detents faster than a
 // round trip completes; without this they queue and keep landing after you stop
 // turning, so the volume appears to drift on its own. Extra turns accumulate
@@ -864,50 +515,20 @@ async function adjustVolume(delta) {
   }
 }
 
-function toggleView() {
-  STATE.view = (STATE.view === 'mixer') ? 'np' : 'mixer';
-  applyView();
-  if (STATE.view === 'mixer') scheduleReturnToNowPlaying();
-  else cancelReturnToNowPlaying();
-}
-
-function applyView() {
-  const v = STATE.view;
-  document.getElementById('mixer-view').style.display = (v === 'mixer') ? 'flex' : 'none';
-  document.getElementById('now-playing-view').style.display = (v === 'np') ? 'flex' : 'none';
-  document.getElementById('playlists-view').style.display = (v === 'playlists') ? 'flex' : 'none';
-  document.getElementById('message').style.display = 'none';
-  if (v === 'np') {
-    renderNowPlaying();
-    startEQ();
-  } else if (v === 'playlists') {
-    stopEQ();
-    renderPlaylists();
-  } else {
-    stopEQ();
-    renderMixer();
-  }
-}
-
 /* =========================================================
- *  SPOTIFY NOW PLAYING (fully proxied by the Mac at
- *  /spotify/now-playing — no tokens or internet on the device)
+ *  NOW PLAYING
  * ========================================================= */
 async function pollSpotify() {
   try {
     const r = await fetch(SERVER + '/spotify/now-playing', { cache: 'no-store' });
     if (!r.ok) return;
-    const j = await r.json();      // {item, is_playing} — item may be null
-    handleNowPlaying(j);
+    handleNowPlaying(await r.json());
   } catch (e) { console.error('spotify poll error', e); }
 }
 
-/* Transport controls — proxied by the Mac (needs Premium + the
-   user-modify-playback-state scope). */
 async function spotifyControl(action) {
   try { await fetch(SERVER + '/spotify/' + action, { method: 'POST' }); }
   catch (e) { console.error('spotify control error', e); }
-  // Re-poll soon so the screen reflects the new state.
   setTimeout(pollSpotify, 350);
   setTimeout(pollSpotify, 1200);
 }
@@ -917,143 +538,223 @@ function handleNowPlaying(j) {
   if (!j || !j.item) {
     s.playing = false;
     s.track = null; s.artist = null; s.album = null; s.artUrl = null;
+    s.progressMs = 0; s.durationMs = 0; s.at = Date.now();
   } else {
     s.playing = !!j.is_playing;
     s.track = j.item.name || '';
     s.artist = (j.item.artists || []).map(a => a.name).join(', ');
     s.album = (j.item.album && j.item.album.name) || '';
+    s.progressMs = j.progress_ms || 0;
+    s.durationMs = j.item.duration_ms || 0;
+    s.at = Date.now();
     const imgs = (j.item.album && j.item.album.images) || [];
-    // Album art lives on the Spotify CDN, which the device can't reach — proxy
-    // it through the Mac.
+    // Album art lives on the Spotify CDN, which the device can't reach — the
+    // server proxies it.
     s.artUrl = imgs.length ? (SERVER + '/spotify/art?u=' + encodeURIComponent(imgs[0].url)) : null;
   }
-  // Now Playing is the home screen; the mixer is only shown transiently while
-  // adjusting volume and reverts on its own. So we don't switch views here.
   if (STATE.view === 'np') renderNowPlaying();
 }
 
-/* =========================================================
- *  NOW PLAYING RENDER
- * ========================================================= */
+function fmtTime(ms) {
+  if (!isFinite(ms) || ms < 0) ms = 0;
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+/* Elapsed position, extrapolated between polls so the bar moves smoothly
+   without polling the server every second. */
+function currentProgressMs() {
+  const s = STATE.spotify;
+  let ms = s.progressMs;
+  if (s.playing) ms += (Date.now() - s.at);
+  if (s.durationMs) ms = Math.min(ms, s.durationMs);
+  return ms;
+}
+
+// Falling back to 'none' would also clear the CSS placeholder gradient, leaving
+// an invisible square for tracks with no artwork.
+const ART_PLACEHOLDER = 'linear-gradient(150deg, #2f4a63, #1d2c3b)';
+let lastArtUrl = null;
 function renderNowPlaying() {
   const s = STATE.spotify;
-  renderDotTextFit(document.getElementById('np-header-canvas'), 'NOW PLAYING', 200, 4, '180,180,180', 4, 0.55);
+  setText(document.getElementById('np-title'), s.track || 'Nothing playing');
+  setText(document.getElementById('np-artist'), s.artist || '');
+  setText(document.getElementById('np-context'), s.album || 'Now Playing');
 
-  const artDiv = document.getElementById('np-art');
-  if (s.artUrl) {
-    artDiv.innerHTML = '<img src="' + s.artUrl + '" alt="art">';
+  // Only reassign the background when the URL changes — otherwise every poll
+  // re-hits the server's art proxy.
+  if (s.artUrl !== lastArtUrl) {
+    lastArtUrl = s.artUrl;
+    document.getElementById('np-art').style.backgroundImage =
+      s.artUrl ? ('url("' + s.artUrl + '")') : ART_PLACEHOLDER;
+  }
+
+  // Play/pause glyph: two bars when playing, triangle when paused.
+  const icon = document.getElementById('pp-icon');
+  const want = s.playing ? 'M7 4h4v16H7zM13 4h4v16h-4z' : 'M7 4l13 8-13 8z';
+  const path = icon.firstElementChild || icon.querySelector('path');
+  if (path && path.getAttribute('d') !== want) path.setAttribute('d', want);
+
+  renderProgress();
+}
+
+function renderProgress() {
+  const s = STATE.spotify;
+  const ms = currentProgressMs();
+  const pct = s.durationMs ? Math.max(0, Math.min(100, (ms / s.durationMs) * 100)) : 0;
+  const fill = document.getElementById('np-progress-fill');
+  const w = pct.toFixed(1) + '%';
+  if (fill.style.width !== w) fill.style.width = w;
+  setText(document.getElementById('np-elapsed'), fmtTime(ms));
+  setText(document.getElementById('np-remain'), s.durationMs ? '-' + fmtTime(s.durationMs - ms) : '-0:00');
+}
+
+/* =========================================================
+ *  PLAYLISTS
+ *  Back button opens it; dial scrolls, 1 plays, 2 refreshes.
+ * ========================================================= */
+const PL_VISIBLE_ROWS = 6;
+const playlistState = {
+  items: [], selected: 0, scrollTop: 0,
+  loading: false, loaded: false, error: false,
+};
+let plRowsBuilt = false;
+let playlistFlashTimer = null;
+
+function openPlaylists() {
+  cancelReturnToNowPlaying();
+  STATE.view = 'playlists';
+  applyView();
+  loadPlaylists(false);
+}
+
+/* Back button: Playlists -> Mixer, or Mixer/NowPlaying -> Playlists. */
+function handleBack() {
+  if (STATE.view === 'playlists') {
+    STATE.view = 'mixer';
+    applyView();
+    scheduleReturnToNowPlaying();
   } else {
-    artDiv.innerHTML = '<div class="placeholder">NO ART</div>';
+    openPlaylists();
   }
+}
 
-  // The info column is ~380px wide; fit text to it so nothing overflows.
-  const INFO_W = 376;
-  renderDotTextFit(document.getElementById('np-track'), s.track || 'NO TRACK', INFO_W, 5.5, '235,235,235', 3, 0.95);
-  renderDotTextFit(document.getElementById('np-artist'), s.artist || '', INFO_W, 3.6, '190,190,190', 2, 0.7);
-  renderDotTextFit(document.getElementById('np-album'), s.album || '', INFO_W, 2.8, '150,150,150', 1, 0.55);
+async function loadPlaylists(force) {
+  if (playlistState.loading) return;
+  if (playlistState.loaded && !force) { renderPlaylists(); return; }
+  playlistState.loading = true;
+  playlistState.error = false;
+  if (STATE.view === 'playlists') renderPlaylists();
+  try {
+    const r = await fetch(SERVER + '/spotify/playlists', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const arr = await r.json();
+    playlistState.items = Array.isArray(arr) ? arr : [];
+    playlistState.selected = 0;
+    playlistState.scrollTop = 0;
+    playlistState.loaded = true;
+  } catch (e) {
+    console.error('playlists fetch error', e);
+    playlistState.error = true;
+  } finally {
+    playlistState.loading = false;
+    if (STATE.view === 'playlists') renderPlaylists();
+  }
+}
 
-  const led = document.getElementById('np-led');
-  led.classList.toggle('playing', !!s.playing);
-  renderDotTextFit(document.getElementById('np-state'), s.playing ? 'PLAYING' : 'PAUSED', 110, 2.8, s.playing ? '60,220,90' : '220,80,80', 4, 0.8);
+function movePlaylistSelection(dir) {
+  const n = playlistState.items.length;
+  if (!n) return;
+  playlistState.selected = Math.max(0, Math.min(n - 1, playlistState.selected + dir));
+  if (playlistState.selected < playlistState.scrollTop) {
+    playlistState.scrollTop = playlistState.selected;
+  } else if (playlistState.selected >= playlistState.scrollTop + PL_VISIBLE_ROWS) {
+    playlistState.scrollTop = playlistState.selected - PL_VISIBLE_ROWS + 1;
+  }
+  renderPlaylists();
+}
 
-  // Play/pause button icon reflects playback state.
-  const pp = document.getElementById('btn-playpause');
-  if (pp) {
-    pp.innerHTML = s.playing
-      ? '<span class="pause-bar"></span><span class="pause-bar"></span>'
-      : '<span class="tri-r"></span>';
+async function playSelectedPlaylist() {
+  const it = playlistState.items[playlistState.selected];
+  if (!it || !it.id) return;
+  showToast('PLAYING');
+  let ok = false;
+  try {
+    // device_name omitted on purpose — the server uses spotify_connect_device
+    // from presets.json, which never reaches the device.
+    const r = await fetch(SERVER + '/spotify/play-playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_uri: it.id }),
+    });
+    const j = await r.json().catch(() => ({}));
+    ok = r.ok && j && j.ok === true;
+  } catch (e) {
+    console.error('play-playlist error', e);
+  }
+  if (playlistFlashTimer) clearTimeout(playlistFlashTimer);
+  if (ok) {
+    playlistFlashTimer = setTimeout(() => {
+      hideToast();
+      STATE.view = 'mixer';
+      applyView();
+      scheduleReturnToNowPlaying();
+      pollSpotify();
+    }, 2000);
+  } else {
+    showToast('ERROR', 2000);
+  }
+}
+
+function buildPlaylistRows() {
+  if (plRowsBuilt) return;
+  const list = document.getElementById('pl-list');
+  list.innerHTML = '';
+  for (let i = 0; i < PL_VISIBLE_ROWS; i++) {
+    const row = document.createElement('div');
+    row.className = 'pl-row';
+    row.addEventListener('click', (function (slot) {
+      return function () {
+        const idx = playlistState.scrollTop + slot;
+        if (idx < playlistState.items.length) {
+          playlistState.selected = idx;
+          renderPlaylists();
+        }
+      };
+    })(i));
+    list.appendChild(row);
+  }
+  plRowsBuilt = true;
+}
+
+function renderPlaylists() {
+  buildPlaylistRows();
+  const rows = document.querySelectorAll('#pl-list .pl-row');
+  const st = playlistState;
+  let placeholder = null;
+  if (st.loading && !st.items.length) placeholder = 'Loading…';
+  else if (st.error) placeholder = 'Could not load playlists';
+  else if (!st.items.length) placeholder = 'No playlists';
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (placeholder !== null) {
+      setText(row, i === 0 ? placeholder : '');
+      row.classList.remove('sel');
+      continue;
+    }
+    const idx = st.scrollTop + i;
+    const it = st.items[idx];
+    setText(row, it ? (it.name || '') : '');
+    row.classList.toggle('sel', !!it && idx === st.selected);
   }
 }
 
 /* =========================================================
- *  EQ VISUALIZER (rainbow bars)
+ *  INPUT
  * ========================================================= */
-var EC=14, ER=5, DOT=7, GAP=3;
-var eqColors=[];
-(function(){
-  var cs=[[0,210,180],[0,220,100],[180,220,0],[255,180,0],[255,60,60],[220,40,180]];
-  for(var j=0;j<ER;j++){
-    var p=j/(ER-1), idx=p*(cs.length-1), lo=Math.floor(idx), hi=Math.min(lo+1,cs.length-1), f=idx-lo;
-    eqColors.push('rgb('+Math.round(cs[lo][0]+(cs[hi][0]-cs[lo][0])*f)+','+Math.round(cs[lo][1]+(cs[hi][1]-cs[lo][1])*f)+','+Math.round(cs[lo][2]+(cs[hi][2]-cs[lo][2])*f)+')');
-  }
-})();
-var eqState = { running: false, raf: 0, levels: new Array(EC).fill(0), targets: new Array(EC).fill(0), lastTarget: 0 };
-
-function drawEQ() {
-  const cv = document.getElementById('eq-canvas');
-  const w = EC*(DOT+GAP)-GAP;
-  const h = ER*(DOT+GAP)-GAP;
-  cv.width = w; cv.height = h;
-  cv.style.width = w+'px'; cv.style.height = h+'px';
-  const ctx = cv.getContext('2d');
-  ctx.clearRect(0,0,w,h);
-  // update targets occasionally
-  const now = performance.now();
-  if (now - eqState.lastTarget > 110) {
-    eqState.lastTarget = now;
-    const active = STATE.spotify.playing;
-    for (let i = 0; i < EC; i++) {
-      if (active) {
-        const bias = 0.5 + 0.5 * Math.sin((now/600) + i*0.7);
-        eqState.targets[i] = Math.min(ER, Math.max(0, Math.round(bias * ER * (0.6 + Math.random()*0.8))));
-      } else {
-        eqState.targets[i] = 0;
-      }
-    }
-  }
-  // ease levels toward targets
-  for (let i = 0; i < EC; i++) {
-    const t = eqState.targets[i];
-    const cur = eqState.levels[i];
-    eqState.levels[i] = cur + (t - cur) * 0.25;
-  }
-  // draw dots
-  for (let c = 0; c < EC; c++) {
-    const lv = eqState.levels[c];
-    for (let r = 0; r < ER; r++) {
-      const rowFromTop = r;
-      const rowFromBottom = ER - 1 - r;
-      const px = c*(DOT+GAP);
-      const py = r*(DOT+GAP);
-      const on = (rowFromBottom + 1) <= lv;
-      ctx.beginPath();
-      if (on) {
-        ctx.fillStyle = eqColors[rowFromBottom];
-        ctx.shadowColor = eqColors[rowFromBottom];
-        ctx.shadowBlur = DOT;
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.05)';
-        ctx.shadowBlur = 0;
-      }
-      ctx.arc(px+DOT/2, py+DOT/2, DOT/2, 0, Math.PI*2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    }
-  }
-}
-
-function eqLoop() {
-  if (!eqState.running) return;
-  drawEQ();
-  eqState.raf = requestAnimationFrame(eqLoop);
-}
-
-function startEQ() {
-  if (eqState.running) return;
-  eqState.running = true;
-  eqLoop();
-}
-
-function stopEQ() {
-  eqState.running = false;
-  if (eqState.raf) cancelAnimationFrame(eqState.raf);
-}
-
-/* =========================================================
- *  INPUT (keyboard + hardware websocket)
- * ========================================================= */
-/* Route a scroll detent: scrolls the playlist on the Playlists screen, adjusts
-   volume everywhere else (unchanged mixer/now-playing behavior). */
 function handleScroll(dir) {
   if (STATE.view === 'playlists') movePlaylistSelection(dir > 0 ? +1 : -1);
   else adjustVolume(dir > 0 ? +VOL_STEP : -VOL_STEP);
@@ -1062,24 +763,20 @@ function handleScroll(dir) {
 function bindKeyboard() {
   window.addEventListener('keydown', (e) => {
     dbg('key', e.key + ' / code=' + e.code);
-    // Back button (5th button) — keyboard fallback for desktop testing. Toggles
-    // the Playlists screen. Handled first so it works from any view.
     if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'm' || e.key === 'M') {
       e.preventDefault();
       handleBack();
       return;
     }
-    // Playlists screen repurposes 1/2 and the arrows; it never touches the
-    // mixer/now-playing key behavior below.
     if (STATE.view === 'playlists') {
       if (e.key === '1')              playSelectedPlaylist();
-      else if (e.key === '2')         loadPlaylists(true);     // refresh
+      else if (e.key === '2')         loadPlaylists(true);
       else if (e.key === 'ArrowUp')   movePlaylistSelection(-1);
       else if (e.key === 'ArrowDown') movePlaylistSelection(+1);
       return;
     }
     if (e.key === '1' || e.key === '2' || e.key === '3') {
-      if (saveArmed) savePreset(e.key);   // SAVE armed → store current mix here
+      if (saveArmed) savePreset(e.key);
       else activatePreset(e.key);
     }
     else if (e.key === '4') { toggleView(); }
@@ -1087,25 +784,22 @@ function bindKeyboard() {
     else if (e.key === 'ArrowDown') { adjustVolume(-VOL_STEP); }
   });
 
-  // The Car Thing's rotary dial is a relative wheel encoder (REL_HWHEEL): it has
-  // no keyboard handler and isn't on the hardware websocket, so the webview
-  // delivers it as a DOM `wheel` event. Use whichever axis is non-zero; one
-  // detent → one volume step (clockwise = louder) — or one playlist row on the
-  // Playlists screen.
+  // The rotary dial is a relative wheel encoder (REL_HWHEEL) with no keyboard
+  // handler, so the webview delivers it as a DOM `wheel` event — one detent per
+  // event (measured: a single detent produces exactly one event, deltaX 53).
   window.addEventListener('wheel', (e) => {
     const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     if (d > 0) handleScroll(+1);
     else if (d < 0) handleScroll(-1);
   }, { passive: true });
 
-  // SAVE button: arm "save current mix to a preset" (then press 1/2/3).
   document.getElementById('save-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     armSave();
   });
 
-  // Tapping anywhere on the mixer that isn't a fader deselects the focused
-  // device, so the dial goes back to controlling all speakers together.
+  // Tapping the mixer away from a fader deselects, so the dial goes back to
+  // controlling all speakers together.
   document.getElementById('mixer-view').addEventListener('click', (e) => {
     if (e.target.closest('.fader') || e.target.closest('#save-btn')) return;
     if (STATE.focus) {
@@ -1116,12 +810,15 @@ function bindKeyboard() {
     scheduleReturnToNowPlaying();
   });
 
-  // Now Playing transport controls (touch).
   document.getElementById('btn-prev').addEventListener('click', () => spotifyControl('previous'));
   document.getElementById('btn-next').addEventListener('click', () => spotifyControl('next'));
   document.getElementById('btn-playpause').addEventListener('click', () => {
-    const action = STATE.spotify.playing ? 'pause' : 'play';
-    STATE.spotify.playing = !STATE.spotify.playing;  // optimistic
+    const s = STATE.spotify;
+    const action = s.playing ? 'pause' : 'play';
+    // Optimistic: flip locally and re-anchor the ticker so the bar doesn't jump.
+    s.progressMs = currentProgressMs();
+    s.at = Date.now();
+    s.playing = !s.playing;
     renderNowPlaying();
     spotifyControl(action);
   });
@@ -1129,36 +826,30 @@ function bindKeyboard() {
 
 function connectHardwareWS() {
   let ws;
-  try {
-    ws = new WebSocket('ws://localhost:8890');
-  } catch (e) { return; }
+  try { ws = new WebSocket('ws://localhost:8890'); }
+  catch (e) { return; }
   ws.onopen = () => console.log('hw ws open');
   ws.onclose = () => setTimeout(connectHardwareWS, 3000);
   ws.onerror = () => {};
   ws.onmessage = (evt) => {
-    dbg('ws', evt.data);   // TEMP: surface every raw hardware event for mapping
+    dbg('ws', evt.data);
     let msg;
     try { msg = JSON.parse(evt.data); } catch (e) { return; }
-    // common shapes: {type:'button', button:1|2|3|4, action:'down'|'up'} or {type:'dial', delta:+1|-1}
-    // The Car Thing's back button arrives either as its own {type:'back'} or as
-    // a 5th button id ({type:'button', button:5}). If yours uses a different id,
-    // change the b === '5' check below (find it with `udevadm`/WS logging).
+    // Shapes seen: {type:'button', button:1..5, action:'down'} and
+    // {type:'dial'|'wheel', delta:+1|-1}. The back button arrives as its own
+    // {type:'back'} or as button id 5 (id still unconfirmed on this unit).
     if (msg.type === 'back') { handleBack(); return; }
     if (msg.type === 'button' && (msg.action === 'down' || msg.action === 'short' || !msg.action)) {
       const b = String(msg.button);
-      if (b === '5') { handleBack(); return; }   // 5th / back button → Playlists
+      if (b === '5') { handleBack(); return; }
       if (STATE.view === 'playlists') {
         if (b === '1') playSelectedPlaylist();
-        else if (b === '2') loadPlaylists(true); // refresh
+        else if (b === '2') loadPlaylists(true);
         return;
       }
       if (b === '1' || b === '2' || b === '3') activatePreset(b);
       else if (b === '4') toggleView();
-    } else if (msg.type === 'dial') {
-      const delta = Number(msg.delta) || 0;
-      if (delta > 0) handleScroll(+1);
-      else if (delta < 0) handleScroll(-1);
-    } else if (msg.type === 'wheel') {
+    } else if (msg.type === 'dial' || msg.type === 'wheel') {
       const delta = Number(msg.delta) || 0;
       if (delta > 0) handleScroll(+1);
       else if (delta < 0) handleScroll(-1);
@@ -1167,57 +858,51 @@ function connectHardwareWS() {
 }
 
 /* =========================================================
- *  MESSAGE SCREEN
+ *  MESSAGE / START
  * ========================================================= */
 function showMessage(text) {
-  document.getElementById('mixer-view').style.display = 'none';
-  document.getElementById('now-playing-view').style.display = 'none';
-  document.getElementById('playlists-view').style.display = 'none';
+  document.getElementById('now-playing-view').classList.remove('active');
+  document.getElementById('mixer-view').classList.remove('active');
+  document.getElementById('playlists-view').classList.remove('active');
   const msg = document.getElementById('message');
   msg.style.display = 'flex';
-  document.getElementById('message-text').textContent = text;
+  setText(document.getElementById('message-text'), text);
 }
 
-/* =========================================================
- *  PLAYER START
- * ========================================================= */
 async function startPlayer() {
   await fetchStatus();
-  applyView();          // renders the mixer
+  applyView();
   bindKeyboard();
   connectHardwareWS();
 
-  // periodic refresh — keep faders in sync if volumes change elsewhere
   setInterval(async () => {
     await fetchStatus();
     if (STATE.view === 'mixer') renderMixer();
-  }, 4000);
+  }, STATUS_POLL_MS);
 
-  // poll spotify
   pollSpotify();
   setInterval(pollSpotify, SPOTIFY_POLL_MS);
+
+  // Local progress ticker — one cheap DOM update a second instead of polling
+  // the server, and only while Now Playing is on screen.
+  setInterval(() => {
+    if (STATE.view === 'np' && STATE.spotify.durationMs) renderProgress();
+  }, 1000);
 }
 
-/* =========================================================
- *  INIT
- * ========================================================= */
 async function init() {
-  // The Car Thing reaches the Mac over a USB (adb reverse) tunnel that may not
-  // be up the instant this page loads at boot. Retry until the server answers,
-  // so a transient connection failure never gets mistaken for "not set up".
+  // The Car Thing reaches the Pi over a USB (adb reverse) tunnel that may not be
+  // up the instant this page loads at boot. Retry until the server answers, so a
+  // transient failure is never mistaken for "not set up".
   while (true) {
-    try {
-      await fetchConfig();
-      break;
-    } catch (e) {
-      showMessage('Connecting to Mac server…');
+    try { await fetchConfig(); break; }
+    catch (e) {
+      showMessage('Connecting to server…');
       await new Promise(res => setTimeout(res, 2000));
     }
   }
-  // The server reports whether Spotify has been set up (client secret + refresh
-  // token present in presets.json). If not, point the user at the Mac auth page.
   if (!STATE.config.spotify_configured) {
-    showMessage('Open http://127.0.0.1:5005/auth on your Mac to complete setup.');
+    showMessage('Open http://127.0.0.1:5005/auth on your computer to finish Spotify setup.');
     return;
   }
   startPlayer();
