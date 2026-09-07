@@ -712,6 +712,35 @@ def save_preset(preset_id):
     return jsonify({"ok": True, "preset": PRESETS[preset_id]["name"], "levels": levels})
 
 
+# Serialises the read-modify-write in adjust_volume. Flask runs threaded, so
+# without this two dial events arriving together both read the same starting
+# volumes and compute conflicting targets.
+_ADJUST_LOCK = threading.Lock()
+
+
+def _speaker_unavailable(key):
+    """Why a speaker can't be driven right now, or None if it can.
+
+    Mirrors the checks in _set_speaker_volume so the webapp can grey a fader out
+    instead of silently swallowing the dial.
+    """
+    cast = CASTS.get(key)
+    if cast is None:
+        return "offline"
+    if SPEAKERS[key].get("only_when_casting") and not _cast_is_casting(key, cast):
+        return "not casting"
+    return None
+
+
+def _unavailable_map():
+    out = {}
+    for key in SPEAKERS:
+        reason = _speaker_unavailable(key)
+        if reason:
+            out[key] = reason
+    return out
+
+
 def _clamp01(x):
     return max(0.0, min(1.0, x))
 
@@ -728,6 +757,25 @@ def adjust_volume():
     data = request.get_json(silent=True) or {}
     delta = float(data.get("delta", 0.0))
     speaker = data.get("speaker")
+
+    # A fader the server can't drive (offline, or a TV that isn't casting) would
+    # silently swallow every turn: the write is skipped and STATE never moves, so
+    # the target never advances and the dial appears dead. Say so instead.
+    if speaker in SPEAKERS:
+        reason = _speaker_unavailable(speaker)
+        if reason:
+            print(f"\n=== Volume adjust [{speaker}] delta={delta:+.3f} -> {reason} ===")
+            return jsonify({
+                "ok": False, "error": reason,
+                "volumes": STATE["volumes"], "unavailable": _unavailable_map(),
+            })
+
+    with _ADJUST_LOCK:
+        return _apply_adjust(delta, speaker)
+
+
+def _apply_adjust(delta, speaker):
+    """Compute and push the new mix. Caller must hold _ADJUST_LOCK."""
     vols = STATE["volumes"]
 
     # If the relevant level looks uninitialized (e.g. right after a restart),
@@ -756,7 +804,11 @@ def adjust_volume():
     # Offline speakers fail silently in _set_speaker_volume; the intended levels
     # are still recorded in STATE, so the UI stays consistent and responsive.
     _dispatch_volumes(new_volumes)
-    return jsonify({"ok": True, "volumes": STATE["volumes"]})
+    return jsonify({
+        "ok": True,
+        "volumes": STATE["volumes"],
+        "unavailable": _unavailable_map(),
+    })
 
 
 @app.route("/status", methods=["GET"])
@@ -765,6 +817,7 @@ def status():
     return jsonify({
         "active_preset": STATE["active_preset"],
         "volumes": STATE["volumes"],
+        "unavailable": _unavailable_map(),
     })
 
 

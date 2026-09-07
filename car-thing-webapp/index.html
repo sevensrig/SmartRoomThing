@@ -276,7 +276,7 @@ const SPOTIFY_POLL_MS = 5000;
 // TEMP: when true, the last keyboard key and hardware-websocket message are
 // shown bottom-left on screen. Used to identify the Car Thing's back button.
 // Set to false (and remove the #dbg element) once the back button is mapped.
-const DEBUG_INPUT = true;
+const DEBUG_INPUT = false;
 function dbg(label, data) {
   if (!DEBUG_INPUT) return;
   const el = document.getElementById('dbg');
@@ -423,6 +423,7 @@ const STATE = {
   activePreset: null,
   view: 'np',             // 'mixer' | 'np' — Now Playing is the home screen
   volumes: {},            // live per-speaker volumes (0..1)
+  unavailable: {},        // speaker key -> reason the server can't drive it
   focus: null,            // speaker key the dial controls, or null = ALL
   spotify: {
     track: null,
@@ -666,6 +667,7 @@ async function fetchStatus() {
     const j = await r.json();
     STATE.activePreset = j.active_preset;
     if (j.volumes) STATE.volumes = j.volumes;
+    STATE.unavailable = j.unavailable || {};
   } catch (e) {}
 }
 
@@ -737,11 +739,18 @@ function renderMixer() {
     const sp = fader.dataset.sp;
     const v = Math.max(0, Math.min(1, STATE.volumes[sp] || 0));
     const focused = STATE.focus === sp;
-    fader.classList.toggle('focus', focused);
+    // The server reports speakers it can't drive (offline, or a TV that isn't
+    // casting). Draw those dimmed so the dial visibly does nothing, rather than
+    // looking live while every turn is silently discarded.
+    const dead = !!STATE.unavailable[sp];
+    fader.classList.toggle('focus', focused && !dead);
+    fader.style.opacity = dead ? '0.35' : '1';
     fader.querySelector('.fader-fill').style.height = (v * 100) + '%';
-    const c = focused ? '255,224,154' : '230,200,120';
-    renderDotTextFit(fader.querySelector('.fader-pct'), String(Math.round(v * 100)), 84, 5, c, focused ? 6 : 3, 0.95);
-    renderDotTextFit(fader.querySelector('.fader-name'), SPEAKER_LABELS[sp] || sp, 110, 3, '160,160,160', 2, 0.65);
+    const c = dead ? '120,120,120' : (focused ? '255,224,154' : '230,200,120');
+    const pct = dead ? '--' : String(Math.round(v * 100));
+    renderDotTextFit(fader.querySelector('.fader-pct'), pct, 84, 5, c, (focused && !dead) ? 6 : 3, 0.95);
+    renderDotTextFit(fader.querySelector('.fader-name'), SPEAKER_LABELS[sp] || sp, 110, 3,
+                     dead ? '110,110,110' : '160,160,160', 2, 0.65);
   });
 }
 
@@ -812,23 +821,46 @@ async function savePreset(id) {
   renderMixer();
 }
 
+// One request in flight at a time. The dial can emit detents faster than a
+// round trip completes; without this they queue and keep landing after you stop
+// turning, so the volume appears to drift on its own. Extra turns accumulate
+// here and go out as a single combined delta on the next request.
+let volInFlight = false;
+let volPending = 0;
+
 async function adjustVolume(delta) {
-  const body = { delta };
-  if (STATE.focus) { body.speaker = STATE.focus; armFocusTimeout(); }
   // Turning the dial shows the mixer so you can see it move; it reverts to Now
   // Playing after a short idle.
   if (STATE.view !== 'mixer') { STATE.view = 'mixer'; applyView(); }
   scheduleReturnToNowPlaying();
+  if (STATE.focus) armFocusTimeout();
+
+  // A focused fader the server can't drive would swallow every turn silently.
+  if (STATE.focus && STATE.unavailable[STATE.focus]) { renderMixer(); return; }
+
+  volPending += delta;
+  if (volInFlight) return;
+  volInFlight = true;
   try {
-    const r = await fetch(SERVER + '/volume/adjust', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const j = await r.json();
-    if (j && j.volumes) { STATE.volumes = j.volumes; renderMixer(); }
+    while (volPending !== 0) {
+      const d = volPending;
+      volPending = 0;
+      const body = { delta: d };
+      if (STATE.focus) body.speaker = STATE.focus;
+      const r = await fetch(SERVER + '/volume/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (j && j.volumes) STATE.volumes = j.volumes;
+      if (j && j.unavailable) STATE.unavailable = j.unavailable;
+      renderMixer();
+    }
   } catch (e) {
     console.error('volume adjust error', e);
+  } finally {
+    volInFlight = false;
   }
 }
 
