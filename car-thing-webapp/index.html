@@ -54,27 +54,50 @@ html, body {
   position: relative;
 }
 
-/* ---------- shared chrome ---------- */
-.topbar {
-  height: 56px;
-  display: flex; align-items: center;
-  padding: 0 26px;
+/* ---------- physical button legend ----------
+ * The 1/2/3/4 buttons sit in the bezel directly above the screen, spread evenly
+ * across its width. This strip puts a tick under each one at its real x
+ * position, with that button's current action beneath — so the labels line up
+ * with the hardware rather than just listing what the buttons do.
+ * Span matches the buttons: 1 starts at the left edge, 4 ends at the right. */
+#btnbar {
+  position: absolute; top: 0; left: 0;
+  width: 800px; height: 40px;
+  display: flex; align-items: flex-start;
+  padding: 7px 26px 0;
+  z-index: 6;
 }
-.topbar .tb-side { width: 44px; font-size: 22px; color: var(--text-dim); }
-.topbar .tb-side.right { text-align: right; }
-.topbar .tb-title {
-  flex: 1; text-align: center;
-  font-size: 17px; font-weight: bold;
+.bb-cell { flex: 1; text-align: center; min-width: 0; }
+.bb-tick {
+  width: 30px; height: 3px; border-radius: 2px;
+  background: rgba(255,255,255,0.16);
+  margin: 0 auto 6px;
+}
+.bb-label {
+  font-size: 12px; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bb-cell.on .bb-tick    { background: rgba(255,255,255,0.34); }
+.bb-cell.on .bb-label   { color: var(--text-dim); }
+.bb-cell.armed .bb-tick { background: var(--fader-focus); }
+.bb-cell.armed .bb-label{ color: var(--fader-focus); }
+
+/* Views sit below the legend. */
+.view { display: none; width: 800px; height: 480px; flex-direction: column; padding-top: 40px; }
+.view.active { display: flex; }
+
+.view-title {
+  height: 30px; line-height: 30px; text-align: center;
+  font-size: 16px; font-weight: bold;
   letter-spacing: 1.4px; text-transform: uppercase;
   color: var(--text-dim);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  padding: 0 120px;
 }
 
-.view { display: none; width: 800px; height: 480px; flex-direction: column; }
-.view.active { display: flex; }
-
 /* ---------- now playing ---------- */
-#np-body { flex: 1; display: flex; align-items: center; padding: 0 34px; }
+#np-body { flex: 1; display: flex; align-items: center; padding: 0 34px 10px; }
 
 #np-art {
   width: 268px; height: 268px; flex: none;
@@ -125,7 +148,7 @@ html, body {
 
 /* ---------- mixer ---------- */
 #save-btn {
-  position: absolute; top: 14px; right: 22px;
+  position: absolute; top: 46px; right: 22px;
   padding: 8px 16px; border-radius: 16px;
   border: 1px solid var(--text-faint);
   font-size: 14px; letter-spacing: 1.2px; color: var(--text-dim);
@@ -202,13 +225,17 @@ html, body {
 <body>
 <div id="app">
 
+  <!-- Physical 1/2/3/4 button legend, aligned to the bezel buttons above the
+       screen. Shared by every view; contents change with the view. -->
+  <div id="btnbar">
+    <div class="bb-cell" id="bb-1"><div class="bb-tick"></div><div class="bb-label"></div></div>
+    <div class="bb-cell" id="bb-2"><div class="bb-tick"></div><div class="bb-label"></div></div>
+    <div class="bb-cell" id="bb-3"><div class="bb-tick"></div><div class="bb-label"></div></div>
+    <div class="bb-cell" id="bb-4"><div class="bb-tick"></div><div class="bb-label"></div></div>
+  </div>
+
   <!-- Now Playing (home screen) -->
   <div class="view" id="now-playing-view">
-    <div class="topbar">
-      <div class="tb-side">&#9662;</div>
-      <div class="tb-title" id="np-context">Now Playing</div>
-      <div class="tb-side right">&#8943;</div>
-    </div>
     <div id="np-body">
       <div id="np-art"></div>
       <div id="np-info">
@@ -234,15 +261,15 @@ html, body {
   <!-- Mixer -->
   <div class="view" id="mixer-view">
     <div id="save-btn">SAVE</div>
-    <div class="topbar"><div class="tb-side"></div><div class="tb-title" id="mix-header">Volume</div><div class="tb-side right"></div></div>
+    <div class="view-title" id="mix-header">Volume</div>
     <div id="faders"></div>
   </div>
 
   <!-- Playlists -->
   <div class="view" id="playlists-view">
-    <div class="topbar"><div class="tb-side">&#9662;</div><div class="tb-title">Playlists</div><div class="tb-side right"></div></div>
+    <div class="view-title">Playlists</div>
     <div id="pl-list"></div>
-    <div id="pl-hint">DIAL SCROLL &nbsp;·&nbsp; 1 PLAY &nbsp;·&nbsp; 2 REFRESH &nbsp;·&nbsp; BACK EXIT</div>
+    <div id="pl-hint">DIAL SCROLL &nbsp;·&nbsp; BACK TO EXIT</div>
   </div>
 
   <div id="toast"></div>
@@ -351,12 +378,37 @@ async function fetchStatus() {
 /* =========================================================
  *  VIEWS
  * ========================================================= */
+/* Keep the bezel-button labels in step with what each button currently does.
+   Cells are in physical order left-to-right, so a label sits under its button. */
+function renderButtonBar() {
+  const presets = (STATE.config && STATE.config.presets) || {};
+  const pname = (id) => (presets[id] && presets[id].name) || ('PRESET ' + id);
+  let labels, live;
+  if (STATE.view === 'playlists') {
+    labels = ['Play', 'Refresh', '', ''];   // 3 and 4 are unbound here
+    live = [true, true, false, false];
+  } else {
+    labels = [pname('1'), pname('2'), pname('3'),
+              STATE.view === 'mixer' ? 'Now Playing' : 'Mixer'];
+    live = [true, true, true, true];
+  }
+  const arming = saveArmed && STATE.view !== 'playlists';
+  for (let i = 0; i < 4; i++) {
+    const cell = document.getElementById('bb-' + (i + 1));
+    if (!cell) continue;
+    setText(cell.querySelector('.bb-label'), labels[i]);
+    cell.classList.toggle('on', live[i] && !!labels[i]);
+    cell.classList.toggle('armed', arming && i < 3);
+  }
+}
+
 function applyView() {
   const v = STATE.view;
   document.getElementById('now-playing-view').classList.toggle('active', v === 'np');
   document.getElementById('mixer-view').classList.toggle('active', v === 'mixer');
   document.getElementById('playlists-view').classList.toggle('active', v === 'playlists');
   document.getElementById('message').style.display = 'none';
+  renderButtonBar();
   if (v === 'mixer') renderMixer();
   else if (v === 'np') renderNowPlaying();
   else renderPlaylists();
@@ -401,6 +453,7 @@ function renderMixer() {
   }
   setText(document.getElementById('mix-header'), title);
   document.getElementById('save-btn').classList.toggle('armed', saveArmed);
+  renderButtonBar();
 
   const faders = document.querySelectorAll('#faders .fader');
   for (let i = 0; i < faders.length; i++) {
@@ -581,7 +634,6 @@ function renderNowPlaying() {
   const s = STATE.spotify;
   setText(document.getElementById('np-title'), s.track || 'Nothing playing');
   setText(document.getElementById('np-artist'), s.artist || '');
-  setText(document.getElementById('np-context'), s.album || 'Now Playing');
 
   // Only reassign the background when the URL changes — otherwise every poll
   // re-hits the server's art proxy.
