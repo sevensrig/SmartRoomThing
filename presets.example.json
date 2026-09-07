@@ -6,28 +6,38 @@
   "spotify_refresh_token": "REPLACE_WITH_SPOTIFY_REFRESH_TOKEN",
   "spotify_connect_device": "Living Room Group",
   "speakers": {
-    "nest_audio":  { "ip_address": "10.0.0.50", "name": "Nest Audio" },
-    "google_home": { "ip_address": "10.0.0.51", "name": "Google Home" },
-    "chromecast":  { "ip_address": "10.0.0.52", "name": "Chromecast" }
+    "nest_audio": {
+      "ip_address": "10.0.0.50",
+      "name": "Nest Audio"
+    },
+    "google_home": {
+      "ip_address": "10.0.0.51",
+      "name": "Google Home"
+    },
+    "chromecast": {
+      "ip_address": "10.0.0.52",
+      "name": "Living Room TV",
+      "only_when_casting": true
+    }
   },
   "presets": {
     "1": {
       "name": "DESK",
-      "nest_audio":  0.6,
+      "nest_audio": 0.6,
       "google_home": 0.5,
-      "chromecast":  0.7
+      "chromecast": 0.7
     },
     "2": {
       "name": "BED",
-      "nest_audio":  0.35,
+      "nest_audio": 0.35,
       "google_home": 0.3,
-      "chromecast":  0.45
+      "chromecast": 0.45
     },
     "3": {
       "name": "AMBIENT",
-      "nest_audio":  0.2,
+      "nest_audio": 0.2,
       "google_home": 0.15,
-      "chromecast":  0.25
+      "chromecast": 0.25
     }
   }
 }

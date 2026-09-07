@@ -571,17 +571,49 @@ def spotify_play_playlist():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+def _cast_is_casting(speaker_key, cast):
+    """True when the device is receiving a Cast session right now.
+
+    Reads pychromecast's cached status, so it's a local lookup — cheap enough for
+    every dial turn. Android TVs report their own foreground app (idle Spotify
+    tile, Plex, ...) as "AndroidNativeApp"; a real Cast app id means the device is
+    actually rendering cast audio.
+    """
+    try:
+        with CAST_LOCKS[speaker_key]:
+            status = cast.status
+    except Exception:
+        return False  # status not ready — treat as not casting
+    app_id = getattr(status, "app_id", None)
+    if not app_id:
+        return False
+    return app_id != "AndroidNativeApp"
+
+
 def _set_speaker_volume(speaker_key, volume):
     """Push an absolute volume (0.0–1.0) to one speaker over its Cast connection.
 
     Records the intended level in STATE first so the mixer/ratio math stays
     consistent even when the push fails (the speaker may be temporarily offline).
     A missing connection or a thrown call fails silently for that speaker — we
-    log it and move on, never retrying or blocking.
+    log it and move on, never retrying or blocking. Devices configured
+    "only_when_casting" are skipped unless casting.
     """
     volume = float(volume)
-    STATE["volumes"][speaker_key] = volume
     cast = CASTS.get(speaker_key)
+
+    # The TV is a registered Spotify Connect device, so a Cast volume write on it
+    # gets forwarded to Spotify and applied to whatever device is *currently*
+    # active — moving audio in another room. That leaks whenever the TV is merely
+    # powered on, so gate on "casting" rather than "awake". Skipping leaves STATE
+    # untouched too, so the fader keeps showing the device's real volume.
+    if (cast is not None
+            and SPEAKERS[speaker_key].get("only_when_casting")
+            and not _cast_is_casting(speaker_key, cast)):
+        print(f"[{speaker_key}] not casting — skipping (target {volume:.2f})")
+        return {"speaker": speaker_key, "ok": False, "error": "not casting"}
+
+    STATE["volumes"][speaker_key] = volume
     if cast is None:
         print(f"[{speaker_key}] not connected — skipping (target {volume:.2f})")
         return {"speaker": speaker_key, "ok": False, "error": "not connected"}

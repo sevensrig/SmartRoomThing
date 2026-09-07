@@ -347,6 +347,12 @@ one-time OAuth flow — it's identical, just open `http://127.0.0.1:5005/auth` o
 the Pi or via an SSH port-forward). `presets.json` is git-ignored — never commit
 it.
 
+Set `"only_when_casting": true` on any speaker that is also a Spotify Connect
+device (a TV, typically). Cast volume writes to such a device get forwarded to
+Spotify, which applies them to whatever device is *currently* active — so without
+this flag the dial moves the volume of a laptop or phone playing in another room.
+With it, the device is only touched while it's actually receiving cast audio.
+
 ### Pi Step 4 — Test the server manually
 
 ```bash
