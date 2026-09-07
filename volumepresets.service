@@ -8,7 +8,7 @@
 #   sudo systemctl start volumepresets
 #   journalctl -u volumepresets -f          # follow logs
 #
-# Adjust User= and the paths below if your repo isn't at /home/pi/SmartRoomThing.
+# Adjust User= and the paths below if your repo isn't at /home/srigsrini/SmartRoomThing.
 
 [Unit]
 Description=Volume Presets server (Google speaker volume control via pychromecast)
@@ -19,12 +19,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/SmartRoomThing
+User=srigsrini
+WorkingDirectory=/home/srigsrini/SmartRoomThing
 # Unbuffered so print() output reaches journald immediately (Python block-buffers
 # stdout when it isn't a TTY, which would otherwise delay/lose log lines).
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/pi/SmartRoomThing/venv/bin/python3 /home/pi/SmartRoomThing/server.py
+ExecStart=/home/srigsrini/SmartRoomThing/venv/bin/python3 /home/srigsrini/SmartRoomThing/server.py
 Restart=on-failure
 RestartSec=5
 # stdout/stderr -> journald (view with: journalctl -u volumepresets)

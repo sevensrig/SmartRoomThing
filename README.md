@@ -390,46 +390,38 @@ disable the kiosk Chromium cache, commit the rootfs writes). `adb` works the
 same on the Pi — just run those commands on the Pi with the Car Thing plugged
 into the **Pi's** USB.
 
-### Pi Step 7 — Install the udev rule for auto `adb reverse`
+### Pi Step 7 — Install the USB tunnel watchdog
 
-So the USB tunnel comes up automatically whenever the Car Thing is plugged in,
-install the oneshot service and the udev rule that triggers it:
+The Car Thing loses its `adb reverse` mapping every time it re-enumerates on USB.
+`adb-watch.sh` notices and re-establishes it:
 
 ```bash
-sudo cp adb-reverse.service /etc/systemd/system/
-sudo cp udev/99-carthing-adb.rules /etc/udev/rules.d/
+sudo cp adb-watch.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo udevadm control --reload-rules
-sudo udevadm trigger
+sudo systemctl enable --now adb-watch
+journalctl -u adb-watch -f              # watch for "tunnel up"
 ```
 
-**Verify the device USB IDs first.** The rule matches `idVendor`/`idProduct`;
-with the Car Thing plugged in, run `lsusb` (or
-`udevadm monitor --udev --subsystem-match=usb` and replug) to confirm the IDs,
-then edit `udev/99-carthing-adb.rules` to match. On plug-in, udev starts
-`adb-reverse.service`, which runs `adb-reverse.sh` — it retries for ~30s to ride
-out the gap between USB enumeration and adb authorizing the device. Check it:
+It polls every 5s rather than reacting to udev, because the Car Thing enumerates
+as an RNDIS gadget (`1d6b:1014`) that no Android udev rule matches. The health
+check is a real HTTP fetch through the tunnel: once the transport dies,
+`adb reverse` still exits 0 and adbd still shows a listener on the device, but
+nothing crosses.
 
-```bash
-journalctl -u adb-reverse -f            # watch for "adb reverse tcp:5005 established"
-adb reverse --list                      # should show 5005
-```
+> First-time adb authorization: if `adb devices` shows `unauthorized`, accept the
+> prompt on the device, then replug.
 
-> First-time adb authorization: the Car Thing may need to accept the host key.
-> If `adb devices` shows `unauthorized`, accept the prompt (or it's auto-accepted
-> on the stock Car Thing image), then replug.
-
-### Pi Step 8 — Enable auto-start at boot (when ready)
-
-Once you've confirmed everything works in manual testing, enable both units so
-they start automatically on every boot for 24/7 operation:
+### Pi Step 8 — Enable auto-start at boot
 
 ```bash
 sudo systemctl enable volumepresets
-sudo systemctl enable adb-reverse      # also fires via udev on plug-in
+sudo systemctl enable adb-watch
 ```
 
-To turn auto-start back off: `sudo systemctl disable volumepresets`.
+With both enabled, powering on the Pi brings up the server and the tunnel with no
+intervention — the Car Thing reaches Now Playing about a minute after boot.
+
+To turn auto-start back off: `sudo systemctl disable volumepresets adb-watch`.
 
 ---
 

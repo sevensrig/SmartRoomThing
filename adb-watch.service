@@ -1,0 +1,25 @@
+# Car Thing USB tunnel watchdog. Replaces the old udev + adb-reverse.service
+# approach, which never fired (the Car Thing isn't a standard Android USB device).
+#
+#   sudo cp adb-watch.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now adb-watch
+#   journalctl -u adb-watch -f
+
+[Unit]
+Description=Car Thing USB tunnel watchdog (keeps adb reverse alive)
+# The health check fetches through the tunnel, so the server must be up.
+After=network-online.target volumepresets.service
+Wants=network-online.target volumepresets.service
+
+[Service]
+Type=simple
+User=srigsrini
+WorkingDirectory=/home/srigsrini/SmartRoomThing
+ExecStart=/home/srigsrini/SmartRoomThing/adb-watch.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
