@@ -642,14 +642,25 @@ def spotify_play_playlist():
             break
         needle = t.lower()
         match = next((d for d in devices if needle in (d.get("name") or "").lower()), None)
+    # No configured target is available. Spotify can only start playback on a
+    # device it already knows about: Cast groups register only while they are
+    # casting, and Google speakers never register at all (they run no Spotify
+    # client). So from cold there is nothing in the room to aim at, and the
+    # honest fallback is whatever session is already active — which is what
+    # "start or change what's playing" means in practice.
+    if not match:
+        match = next((d for d in devices if d.get("is_active")), None)
+        if match:
+            print(f"[spotify] play-playlist: {targets} unavailable — "
+                  f"using the active session on {match.get('name')!r}")
+
     if not match:
         names = [d.get("name") for d in devices]
-        print(f"[spotify] play-playlist: none of {targets} found among {names}")
-        # Say *why* rather than "device not found" — the usual cause is that
-        # nothing is playing in the room yet, so the group hasn't registered.
+        print(f"[spotify] play-playlist: none of {targets} found, and no active "
+              f"session among {names}")
         return jsonify({
             "ok": False,
-            "error": "no room device",
+            "error": "no active session",
             "tried": targets,
             "available": names,
         }), 404

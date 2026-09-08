@@ -486,10 +486,18 @@ To turn auto-start back off: `sudo systemctl disable volumepresets adb-watch`.
 | GET    | `/spotify/token`    | —                     | `{ok, have_token}` (debug: confirms server can mint a token) |
 | GET    | `/spotify/playlists` | —                    | `[{id, name, image_url}]` — the user's saved playlists (live; `id` is the playlist URI). Needs the `playlist-read-private` scope. |
 | GET    | `/spotify/devices`  | —                     | Raw Spotify Connect devices array |
-| POST   | `/spotify/play-playlist` | `{"playlist_uri": "...", "device_name"?: "..."}` | `{ok:true}` — starts the playlist on the named Connect device (defaults to `spotify_connect_device` from config); `404 {"error":"device not found"}` if no match |
+| POST   | `/spotify/play-playlist` | `{"playlist_uri": "...", "device_name"?: "..."}` | `{ok:true}` — starts the playlist. Targets are tried in order: `device_name`, then each entry of `spotify_connect_device`, then whatever Spotify session is currently active. `404 {"error":"no active session", tried, available}` if nothing is playing anywhere |
 | POST   | `/spotify/play` `/pause` `/next` `/previous` | — | `{ok, status}` — transport controls (resume/pause/skip; `/spotify/play` is unchanged) |
 | GET    | `/auth`             | —                     | One-time Spotify OAuth page (run on the Mac) |
 | GET    | `/`                 | —                     | Car Thing webapp (or auth completion if `?code=`) |
+
+> **Playlist targets:** Spotify can only start playback on a device already
+> registered to the account. A Cast group registers *only while something is
+> casting to it*, and Google speakers never register at all — they run no Spotify
+> client. So there is no way to start playback in the room from cold; set
+> `spotify_connect_device` to an ordered list (group first, then any real
+> Spotify-app device such as a TV) and the server falls back to the active
+> session when none of them is available.
 
 > **Playlists screen & Spotify scope:** the Car Thing's **back button** (5th
 > button) opens a **Playlists** screen — dial scrolls, **button 1** plays the

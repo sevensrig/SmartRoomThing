@@ -755,8 +755,8 @@ async function playSelectedPlaylist() {
     ok = r.ok && j && j.ok === true;
     // Show the server's reason. The usual failure is that nothing is playing in
     // the room yet, so the Cast group hasn't registered with Spotify.
-    if (!ok) failMsg = (j && j.error === 'no room device')
-      ? 'START MUSIC IN THE ROOM FIRST'
+    if (!ok) failMsg = (j && j.error === 'no active session')
+      ? 'PLAY SOMETHING ON SPOTIFY FIRST'
       : ((j && j.error) ? String(j.error).toUpperCase() : 'ERROR');
   } catch (e) {
     console.error('play-playlist error', e);
