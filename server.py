@@ -12,12 +12,14 @@ own); that logic is unchanged.
 """
 
 import base64
+import collections
 import json
 import os
 import time
 import sys
 import threading
 import uuid
+import http.client
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -284,6 +286,57 @@ def get_presets():
     })
 
 
+# Reused HTTPS connections, one per host.
+#
+# A fresh TLS handshake costs roughly 243ms of wall time and 23ms of CPU here —
+# ARMv7 on a Pi 2 has no crypto acceleration — and the now-playing poll runs
+# every few seconds. Measured against api.spotify.com: 391ms wall / 31.7ms CPU
+# per call opening a new connection, versus 148ms / 8.3ms reusing one.
+_HTTP_CONNS = {}
+_HTTP_LOCKS = {}
+_HTTP_POOL_LOCK = threading.Lock()
+
+
+def _host_lock(host):
+    with _HTTP_POOL_LOCK:
+        lock = _HTTP_LOCKS.get(host)
+        if lock is None:
+            lock = _HTTP_LOCKS[host] = threading.Lock()
+        return lock
+
+
+def _https(host, method, path, headers=None, body=None, timeout=8):
+    """Request over a kept-alive connection to `host` -> (status, headers, body).
+
+    Retries once when a *reused* connection turns out to have been closed by the
+    far end, which is ordinary for keep-alive. A brand-new connection that fails
+    is a real error and is raised.
+    """
+    last = None
+    with _host_lock(host):
+        for _ in (0, 1):
+            conn = _HTTP_CONNS.get(host)
+            reused = conn is not None
+            if conn is None:
+                conn = http.client.HTTPSConnection(host, timeout=timeout)
+                _HTTP_CONNS[host] = conn
+            try:
+                conn.request(method, path, body=body, headers=headers or {})
+                resp = conn.getresponse()
+                data = resp.read()
+                return resp.status, dict(resp.getheaders()), data
+            except Exception as e:
+                last = e
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                _HTTP_CONNS.pop(host, None)
+                if not reused:
+                    break
+    raise last
+
+
 # The Car Thing has no internet of its own (it reaches the Mac only over USB via
 # adb reverse), so the Mac proxies every Spotify call. The access token is cached
 # here and never leaves the Mac.
@@ -304,24 +357,23 @@ def _spotify_access_token():
     basic = base64.b64encode(
         f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode("utf-8")
     ).decode("ascii")
-    req = urllib.request.Request(
-        "https://accounts.spotify.com/api/token",
-        data=data,
-        headers={
-            "Authorization": "Basic " + basic,
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            j = json.loads(resp.read().decode("utf-8"))
+        status, _, raw = _https(
+            "accounts.spotify.com", "POST", "/api/token",
+            headers={
+                "Authorization": "Basic " + basic,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body=data,
+        )
+        if status != 200:
+            print(f"[spotify] token refresh failed: HTTP {status} "
+                  f"{raw.decode('utf-8', errors='replace')[:200]}")
+            return None
+        j = json.loads(raw.decode("utf-8"))
         _TOKEN_CACHE["access_token"] = j["access_token"]
         _TOKEN_CACHE["expires_at"] = now + j.get("expires_in", 3600)
         return _TOKEN_CACHE["access_token"]
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")[:200]
-        print(f"[spotify] token refresh failed: HTTP {e.code} {detail}")
     except Exception as e:
         print(f"[spotify] token refresh error: {e}")
     return None
@@ -347,23 +399,28 @@ def spotify_now_playing():
     token = _spotify_access_token()
     if not token:
         return jsonify({"item": None, "is_playing": False, "error": "no token"}), 502
-    req = urllib.request.Request(
-        "https://api.spotify.com/v1/me/player/currently-playing",
-        headers={"Authorization": "Bearer " + token},
-        method="GET",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            if resp.status in (202, 204):
-                return jsonify({"item": None, "is_playing": False})
-            body = resp.read().decode("utf-8")
-        return app.response_class(body, mimetype="application/json")
-    except urllib.error.HTTPError as e:
-        print(f"[spotify] now-playing failed: HTTP {e.code}")
-        return jsonify({"item": None, "is_playing": False, "error": f"HTTP {e.code}"}), 502
+        status, _, raw = _https(
+            "api.spotify.com", "GET", "/v1/me/player/currently-playing",
+            headers={"Authorization": "Bearer " + token},
+        )
+        if status in (202, 204):
+            return jsonify({"item": None, "is_playing": False})
+        if status != 200:
+            print(f"[spotify] now-playing failed: HTTP {status}")
+            return jsonify({"item": None, "is_playing": False, "error": f"HTTP {status}"}), 502
+        return app.response_class(raw.decode("utf-8"), mimetype="application/json")
     except Exception as e:
         print(f"[spotify] now-playing error: {e}")
         return jsonify({"item": None, "is_playing": False, "error": str(e)}), 502
+
+
+# Album art cache. Each image is ~90 KB and costs ~109ms of server CPU to fetch
+# and proxy; the Car Thing re-requests it whenever the track changes and albums
+# repeat, so keeping the last few makes those free.
+_ART_CACHE = collections.OrderedDict()   # url -> (content_type, bytes)
+_ART_CACHE_MAX = 16                      # ~1.5 MB worst case
+_ART_LOCK = threading.Lock()
 
 
 @app.route("/spotify/art", methods=["GET"])
@@ -374,14 +431,33 @@ def spotify_art():
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https" or not parsed.netloc.endswith(".scdn.co"):
         return ("forbidden", 403)
-    try:
-        with urllib.request.urlopen(url, timeout=8) as resp:
-            data = resp.read()
-            ctype = resp.headers.get("Content-Type", "image/jpeg")
+    def _art_response(ctype, data, cached):
         out = make_response(data)
         out.headers["Content-Type"] = ctype
         out.headers["Cache-Control"] = "public, max-age=86400"
+        out.headers["X-Art-Cache"] = "hit" if cached else "miss"
         return out
+
+    with _ART_LOCK:
+        hit = _ART_CACHE.get(url)
+        if hit is not None:
+            _ART_CACHE.move_to_end(url)
+    if hit is not None:
+        return _art_response(hit[0], hit[1], True)
+
+    try:
+        path = parsed.path + (("?" + parsed.query) if parsed.query else "")
+        status, headers, data = _https(parsed.netloc, "GET", path)
+        if status != 200:
+            print(f"[spotify] art proxy: HTTP {status}")
+            return ("", 502)
+        ctype = headers.get("Content-Type", "image/jpeg")
+        with _ART_LOCK:
+            _ART_CACHE[url] = (ctype, data)
+            _ART_CACHE.move_to_end(url)
+            while len(_ART_CACHE) > _ART_CACHE_MAX:
+                _ART_CACHE.popitem(last=False)
+        return _art_response(ctype, data, False)
     except Exception as e:
         print(f"[spotify] art proxy error: {e}")
         return ("", 502)
@@ -571,47 +647,70 @@ def spotify_play_playlist():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
-def _set_speaker_volume(speaker_key, volume):
-    """Push an absolute volume (0.0–1.0) to one speaker over its Cast connection.
+# One writer thread per speaker, each holding only the latest target.
+#
+# A Cast set_volume takes 100-1000ms (measured: nest med 105ms, home med 212ms,
+# TV med 99ms but up to 1014ms). The old code fanned out and joined before
+# replying, so /volume/adjust took ~1.2s — and with the webapp keeping one
+# request in flight, that capped the dial at under one step per second.
+#
+# Now a request records the intended level and hands the target to the writer,
+# which applies the most recent value it has seen. Turning the dial fast collapses
+# to a single write per speaker instead of a queue that keeps landing after you
+# stop, and the response no longer waits for the network at all.
+VOL_TARGETS = {}                     # speaker key -> latest target, or None
+VOL_WAKE = {key: threading.Event() for key in SPEAKERS}
+VOL_TARGET_LOCK = threading.Lock()
 
-    Records the intended level in STATE first so the mixer/ratio math stays
-    consistent even when the push fails (the speaker may be temporarily offline).
-    A missing connection or a thrown call fails silently for that speaker — we
-    log it and move on, never retrying or blocking.
+
+def _volume_writer(speaker_key):
+    """Apply the newest queued target for one speaker, forever."""
+    while True:
+        VOL_WAKE[speaker_key].wait()
+        VOL_WAKE[speaker_key].clear()
+        with VOL_TARGET_LOCK:
+            volume = VOL_TARGETS.get(speaker_key)
+            VOL_TARGETS[speaker_key] = None
+        if volume is None:
+            continue
+        cast = CASTS.get(speaker_key)
+        if cast is None:
+            print(f"[{speaker_key}] not connected — skipping (target {volume:.2f})")
+            continue
+        try:
+            with CAST_LOCKS[speaker_key]:
+                cast.set_volume(volume)
+            print(f"[{speaker_key}] -> {volume:.2f}")
+        except Exception as e:
+            print(f"[{speaker_key}] set_volume failed: {e}")
+
+
+def _start_volume_writers():
+    for key in SPEAKERS:
+        threading.Thread(target=_volume_writer, args=(key,),
+                         name=f"vol-{key}", daemon=True).start()
+
+
+def _set_speaker_volume(speaker_key, volume):
+    """Record an intended volume and hand it to that speaker's writer.
+
+    Returns as soon as the target is queued. STATE holds the intended level so
+    the mixer's ratio maths and the HTTP response stay consistent; the periodic
+    refresh in _refresh_volumes_from_casts reconciles it with what the speakers
+    actually did.
     """
     volume = float(volume)
-    cast = CASTS.get(speaker_key)
     STATE["volumes"][speaker_key] = volume
-    if cast is None:
-        print(f"[{speaker_key}] not connected — skipping (target {volume:.2f})")
-        return {"speaker": speaker_key, "ok": False, "error": "not connected"}
-    try:
-        with CAST_LOCKS[speaker_key]:
-            cast.set_volume(volume)
-        print(f"[{speaker_key}] -> {volume:.2f}")
-        return {"speaker": speaker_key, "ok": True}
-    except Exception as e:
-        print(f"[{speaker_key}] set_volume failed: {e}")
-        return {"speaker": speaker_key, "ok": False, "error": str(e)}
+    with VOL_TARGET_LOCK:
+        VOL_TARGETS[speaker_key] = volume
+    VOL_WAKE[speaker_key].set()
+    return {"speaker": speaker_key, "ok": True, "queued": True}
 
 
 def _dispatch_volumes(volume_map):
-    """Fan out volume changes to all speakers concurrently (one thread each) and
-    join before returning, so the HTTP response reflects actual completion."""
-    results = {}
-
-    def worker(key, vol):
-        results[key] = _set_speaker_volume(key, vol)
-
-    threads = [
-        threading.Thread(target=worker, args=(key, vol), name=f"vol-{key}")
-        for key, vol in volume_map.items()
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    return [results[key] for key in volume_map]
+    """Queue a volume for every speaker in the map. Does not block on the
+    network — see _volume_writer."""
+    return [_set_speaker_volume(key, vol) for key, vol in volume_map.items()]
 
 
 _volumes_synced_at = 0.0
@@ -799,6 +898,7 @@ def main():
         print(f" Spotify:        NOT configured — visit http://127.0.0.1:{SERVER_PORT}/auth")
     print(" Connecting to speakers (by static IP, no discovery):")
     _init_casts()
+    _start_volume_writers()
     print(" Speakers:")
     for key, info in SPEAKERS.items():
         state = "connected" if CASTS.get(key) is not None else "OFFLINE"
