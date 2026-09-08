@@ -137,13 +137,19 @@ html, body {
   margin-top: 9px;
 }
 
-#np-controls { display: flex; align-items: center; margin-top: 26px; }
+#np-controls { display: flex; align-items: center; margin-top: 22px; }
+/* Generous tap targets — this is a touchscreen reached at arm's length, so the
+   hit area is deliberately larger than the glyph it contains. */
 .ctl {
-  width: 74px; height: 58px;
+  width: 104px; height: 84px;
   display: flex; align-items: center; justify-content: center;
-  margin-right: 26px;
+  margin-right: 14px;
+  border-radius: 14px;
 }
 .ctl svg { fill: var(--text); }
+/* Press feedback on the whole target, not just the glyph, so a tap that lands
+   near the edge still visibly registers. */
+.ctl:active { background: rgba(255,255,255,0.12); }
 .ctl:active svg { fill: var(--text-dim); }
 
 /* ---------- mixer ---------- */
@@ -245,13 +251,13 @@ html, body {
         <div id="np-times"><span id="np-elapsed">0:00</span><span id="np-remain">-0:00</span></div>
         <div id="np-controls">
           <div class="ctl" id="btn-prev">
-            <svg width="34" height="34" viewBox="0 0 24 24"><path d="M6 5h2.5v14H6zM20 5v14L9.5 12z"/></svg>
+            <svg width="44" height="44" viewBox="0 0 24 24"><path d="M6 5h2.5v14H6zM20 5v14L9.5 12z"/></svg>
           </div>
           <div class="ctl" id="btn-playpause">
-            <svg width="40" height="40" viewBox="0 0 24 24" id="pp-icon"><path d="M7 4h4v16H7zM13 4h4v16h-4z"/></svg>
+            <svg width="56" height="56" viewBox="0 0 24 24" id="pp-icon"><path d="M7 4h4v16H7zM13 4h4v16h-4z"/></svg>
           </div>
           <div class="ctl" id="btn-next">
-            <svg width="34" height="34" viewBox="0 0 24 24"><path d="M15.5 5H18v14h-2.5zM4 5l10.5 7L4 19z"/></svg>
+            <svg width="44" height="44" viewBox="0 0 24 24"><path d="M15.5 5H18v14h-2.5zM4 5l10.5 7L4 19z"/></svg>
           </div>
         </div>
       </div>
