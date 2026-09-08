@@ -419,6 +419,7 @@ def spotify_now_playing():
 # and proxy; the Car Thing re-requests it whenever the track changes and albums
 # repeat, so keeping the last few makes those free.
 ART_HOST_SUFFIXES = (".scdn.co", ".spotifycdn.com")
+PLAYLIST_COVER_MIN = 200                 # smallest cover width the grid will accept
 _ART_CACHE = collections.OrderedDict()   # url -> (content_type, bytes)
 _ART_CACHE_MAX = 48                      # album art plus a list of playlist covers
 _ART_LOCK = threading.Lock()
@@ -561,13 +562,17 @@ def spotify_playlists():
     for it in data.get("items", []):
         if not it:
             continue  # Spotify occasionally returns null items for dead playlists
-        # Prefer the smallest cover Spotify offers. Rows render it at 40px, and
-        # most playlists expose 640/300/60 — proxying the 60px variant costs a
-        # couple of KB instead of ~90. Mosaic covers report no dimensions at all,
-        # in which case there is only one to take.
+        # The grid draws covers at ~140px, so take the smallest variant that is
+        # still at least PLAYLIST_COVER_MIN wide — below that they visibly soften.
+        # Auto-generated mosaic covers offer 640/300/60; user-uploaded ones report
+        # no dimensions and come in a single size, so there is nothing to choose.
         images = [i for i in (it.get("images") or []) if i.get("url")]
         sized = [i for i in images if isinstance(i.get("width"), int)]
-        pick = min(sized, key=lambda i: i["width"]) if sized else (images[-1] if images else None)
+        if sized:
+            big = [i for i in sized if i["width"] >= PLAYLIST_COVER_MIN]
+            pick = min(big, key=lambda i: i["width"]) if big else max(sized, key=lambda i: i["width"])
+        else:
+            pick = images[0] if images else None
         out.append({
             "id": it.get("uri"),
             "name": it.get("name", ""),

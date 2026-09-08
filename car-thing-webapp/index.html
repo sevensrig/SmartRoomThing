@@ -183,24 +183,35 @@ html, body {
 .fader.dead { opacity: 0.34; }
 
 /* ---------- playlists ---------- */
-#pl-list { flex: 1; padding: 2px 34px; overflow: hidden; }
-.pl-row {
-  height: 56px;
-  display: flex; align-items: center;
-  padding: 0 14px; border-radius: 10px;
-  font-size: 22px; color: var(--text-dim);
+/* 4x2 grid of covers. Grid (and gap within grid) is fine on Chromium 69; only
+   flexbox gap is missing. The hint bar is gone — two rows of covers need the
+   height, and the button legend above already names what 1 and 2 do. */
+#pl-list {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 12px 16px;
+  padding: 4px 30px 14px;
+  overflow: hidden;
+}
+.pl-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  border-radius: 12px; padding: 7px 5px 5px;
+  min-width: 0;
 }
 .pl-thumb {
-  width: 40px; height: 40px; flex: none;
-  margin-right: 14px; border-radius: 6px;
+  width: 138px; height: 138px; flex: none;
+  border-radius: 9px;
   background: #253243 center/cover no-repeat;
 }
-.pl-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pl-row.sel { background: rgba(255,255,255,0.10); color: var(--text); font-weight: bold; }
-#pl-hint {
-  height: 44px; line-height: 44px; text-align: center;
-  font-size: 14px; letter-spacing: 1.2px; color: var(--text-faint);
+.pl-name {
+  margin-top: 7px; width: 100%;
+  font-size: 15px; color: var(--text-dim); text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.pl-tile.sel { background: rgba(255,255,255,0.13); }
+.pl-tile.sel .pl-name { color: var(--text); font-weight: bold; }
 
 /* ---------- message ---------- */
 #message {
@@ -281,7 +292,6 @@ html, body {
   <div class="view" id="playlists-view">
     <div class="view-title">Playlists</div>
     <div id="pl-list"></div>
-    <div id="pl-hint">DIAL SCROLL &nbsp;·&nbsp; BACK TO EXIT</div>
   </div>
 
   <div id="toast"></div>
@@ -682,7 +692,9 @@ function renderProgress() {
  *  PLAYLISTS
  *  Back button opens it; dial scrolls, 1 plays, 2 refreshes.
  * ========================================================= */
-const PL_VISIBLE_ROWS = 6;
+const PL_COLS = 4;
+const PL_ROWS = 2;
+const PL_VISIBLE = PL_COLS * PL_ROWS;
 const playlistState = {
   items: [], selected: 0, scrollTop: 0,
   loading: false, loaded: false, error: false,
@@ -735,11 +747,12 @@ function movePlaylistSelection(dir) {
   const n = playlistState.items.length;
   if (!n) return;
   playlistState.selected = Math.max(0, Math.min(n - 1, playlistState.selected + dir));
-  if (playlistState.selected < playlistState.scrollTop) {
-    playlistState.scrollTop = playlistState.selected;
-  } else if (playlistState.selected >= playlistState.scrollTop + PL_VISIBLE_ROWS) {
-    playlistState.scrollTop = playlistState.selected - PL_VISIBLE_ROWS + 1;
-  }
+  // Scroll by whole rows, so the grid never shows a half row.
+  const selRow = Math.floor(playlistState.selected / PL_COLS);
+  let topRow = Math.floor(playlistState.scrollTop / PL_COLS);
+  if (selRow < topRow) topRow = selRow;
+  else if (selRow >= topRow + PL_ROWS) topRow = selRow - PL_ROWS + 1;
+  playlistState.scrollTop = topRow * PL_COLS;
   renderPlaylists();
 }
 
@@ -785,9 +798,9 @@ function buildPlaylistRows() {
   if (plRowsBuilt) return;
   const list = document.getElementById('pl-list');
   list.innerHTML = '';
-  for (let i = 0; i < PL_VISIBLE_ROWS; i++) {
+  for (let i = 0; i < PL_VISIBLE; i++) {
     const row = document.createElement('div');
-    row.className = 'pl-row';
+    row.className = 'pl-tile';
     row.innerHTML = '<div class="pl-thumb"></div><div class="pl-name"></div>';
     row.addEventListener('click', (function (slot) {
       return function () {
@@ -820,7 +833,7 @@ function setThumb(el, url, visible) {
 
 function renderPlaylists() {
   buildPlaylistRows();
-  const rows = document.querySelectorAll('#pl-list .pl-row');
+  const rows = document.querySelectorAll('#pl-list .pl-tile');
   const st = playlistState;
   let placeholder = null;
   if (st.loading && !st.items.length) placeholder = 'Loading…';
