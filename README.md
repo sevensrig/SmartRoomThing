@@ -300,6 +300,26 @@ as on the Mac.
                                                      └── proxies ──> [Spotify Web API] (now-playing, art)
 ```
 
+> **Keep Spotify signed out of the TV.** If the TV is signed in to your Spotify
+> account it registers as a Spotify Connect device, and from then on *any* write
+> to its Cast volume is reported to Spotify and applied to whichever session is
+> currently active. Two things follow, both measured on this setup:
+>
+> - While the TV is a member of a **casting Cast group**, that closes a loop —
+>   the write moves the session, the session rescales every group member
+>   including the TV, and it reports again. A single volume write took the room
+>   from 4% to 100% in about 15 seconds with no further input.
+> - While Spotify is **playing on another device**, the write moves *that*
+>   device's volume instead — turning the dial here changed a laptop's volume in
+>   another room.
+>
+> Signing Spotify out of the TV removes it from `/me/player/devices` and cuts the
+> reporting path, which is why `server.py` can write every speaker directly with
+> no special-casing. If you ever sign back in, both behaviours return and will
+> look like an unexplained regression. The cost of staying signed out is that the
+> TV is no longer a Spotify Connect target, so playlists can't be started in the
+> room from cold — see the playlist targets note below.
+
 > **Config format note:** on this branch, `presets.example.json` uses the Pi
 > format — each speaker has an `ip_address` (its static DHCP IP) instead of a
 > Home Assistant `entity_id`, and the `ha_url` / `ha_token` fields are gone.
