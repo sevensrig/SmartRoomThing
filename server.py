@@ -587,9 +587,11 @@ def spotify_play_playlist():
     """Start a playlist on a Spotify Connect device (the Google speaker group).
 
     Body: {"playlist_uri": "spotify:playlist:...", "device_name": "..."}.
-    `device_name` is optional and defaults to `spotify_connect_device` from
-    presets.json, so the target never has to be hardcoded in the webapp. The
-    device is matched by case-insensitive substring of its Spotify-reported name.
+    `device_name` is optional; without it the targets come from
+    `spotify_connect_device` in presets.json, which may be a single name or an
+    ordered list of fallbacks. Names match case-insensitively on a substring of
+    the Spotify-reported name; `spotify_connect_device_id` is tried first as an
+    exact match in case a device was renamed.
 
     This is a *separate* endpoint from /spotify/play (which stays a plain
     resume-playback call) so no existing caller's behaviour changes."""
@@ -597,13 +599,25 @@ def spotify_play_playlist():
         return jsonify({"ok": False, "error": "spotify not configured"}), 503
     data = request.get_json(silent=True) or {}
     playlist_uri = data.get("playlist_uri")
-    device_name = data.get("device_name") or SPOTIFY_CONNECT_DEVICE
     if not playlist_uri:
         return jsonify({"ok": False, "error": "missing playlist_uri"}), 400
-    if not device_name:
+
+    # Targets are tried in order. spotify_connect_device may be a single name or
+    # a list, so a Cast group can be preferred with a real Spotify-app device
+    # (a TV, a phone) behind it — a group only appears in Spotify's device list
+    # while something is already casting to it, so on a cold start it is absent.
+    targets = []
+    if data.get("device_name"):
+        targets.append(data["device_name"])
+    cfg = SPOTIFY_CONNECT_DEVICE
+    if isinstance(cfg, list):
+        targets.extend([c for c in cfg if c])
+    elif cfg:
+        targets.append(cfg)
+    if not targets:
         return jsonify({
             "ok": False,
-            "error": "no device_name (set spotify_connect_device in presets.json)",
+            "error": "no target configured (set spotify_connect_device)",
         }), 400
     token = _spotify_access_token()
     if not token:
@@ -618,12 +632,27 @@ def spotify_play_playlist():
     except Exception as e:
         print(f"[spotify] play-playlist devices lookup error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 502
-    needle = device_name.lower()
-    match = next((d for d in devices if needle in (d.get("name") or "").lower()), None)
+    match = None
+    # An exact id match first, in case a device was renamed.
+    want_id = _config_value("spotify_connect_device_id")
+    if want_id:
+        match = next((d for d in devices if d.get("id") == want_id), None)
+    for t in targets:
+        if match:
+            break
+        needle = t.lower()
+        match = next((d for d in devices if needle in (d.get("name") or "").lower()), None)
     if not match:
         names = [d.get("name") for d in devices]
-        print(f"[spotify] play-playlist: device '{device_name}' not found among {names}")
-        return jsonify({"error": "device not found"}), 404
+        print(f"[spotify] play-playlist: none of {targets} found among {names}")
+        # Say *why* rather than "device not found" — the usual cause is that
+        # nothing is playing in the room yet, so the group hasn't registered.
+        return jsonify({
+            "ok": False,
+            "error": "no room device",
+            "tried": targets,
+            "available": names,
+        }), 404
 
     # 2) Start the playlist context on that device.
     device_id = match.get("id", "")

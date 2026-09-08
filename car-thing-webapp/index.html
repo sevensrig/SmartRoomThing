@@ -742,6 +742,7 @@ async function playSelectedPlaylist() {
   if (!it || !it.id) return;
   showToast('PLAYING');
   let ok = false;
+  let failMsg = 'ERROR';
   try {
     // device_name omitted on purpose — the server uses spotify_connect_device
     // from presets.json, which never reaches the device.
@@ -752,6 +753,11 @@ async function playSelectedPlaylist() {
     });
     const j = await r.json().catch(() => ({}));
     ok = r.ok && j && j.ok === true;
+    // Show the server's reason. The usual failure is that nothing is playing in
+    // the room yet, so the Cast group hasn't registered with Spotify.
+    if (!ok) failMsg = (j && j.error === 'no room device')
+      ? 'START MUSIC IN THE ROOM FIRST'
+      : ((j && j.error) ? String(j.error).toUpperCase() : 'ERROR');
   } catch (e) {
     console.error('play-playlist error', e);
   }
@@ -765,7 +771,7 @@ async function playSelectedPlaylist() {
       pollSpotify();
     }, 2000);
   } else {
-    showToast('ERROR', 2000);
+    showToast(failMsg, 2600);
   }
 }
 
