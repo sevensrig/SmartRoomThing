@@ -453,6 +453,13 @@ To turn auto-start back off: `sudo systemctl disable volumepresets adb-watch`.
   `init()` retries until the server is reachable, then either starts or (if
   `/presets` reports Spotify unconfigured) shows a message pointing to the Mac
   auth page.
+- **`car-thing-webapp/backlight_watch.sh`** — runs **on the Car Thing** under its
+  own supervisord, not on the Pi. Polls `/ping` every 3s and powers the panel off
+  when the server is unreachable (Pi off, or the USB tunnel down), back on when it
+  returns. Install it to
+  `/usr/share/qt-superbird-app/backlight_watch.sh` the same way as the webapp;
+  `supervisorctl restart dockbacklight` picks it up. It is kept here because it
+  otherwise exists only on the device's flash and is lost on a reflash.
 - **`monitor_watch.sh`** — polls `system_profiler SPDisplaysDataType` every
   5 seconds for the string `LG HDR WFHD`. On connect it starts the
   `homeassistant` Docker container (waiting up to 30s for its API to come up),

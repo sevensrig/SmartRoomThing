@@ -876,6 +876,18 @@ def _apply_adjust(delta, speaker):
     })
 
 
+@app.route("/ping", methods=["GET"])
+def ping():
+    """Liveness only — no body, no Cast reads.
+
+    backlight_watch.sh on the Car Thing polls this every few seconds to decide
+    whether to power the panel. It only cares whether the request succeeds, so
+    serving it from /status meant a volume refresh and a JSON build for a caller
+    that discards the body.
+    """
+    return ("", 204)
+
+
 @app.route("/status", methods=["GET"])
 def status():
     _refresh_volumes_from_casts()  # keep the UI showing the speakers' real levels
