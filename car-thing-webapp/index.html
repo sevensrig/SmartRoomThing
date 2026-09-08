@@ -185,11 +185,17 @@ html, body {
 /* ---------- playlists ---------- */
 #pl-list { flex: 1; padding: 2px 34px; overflow: hidden; }
 .pl-row {
-  height: 56px; line-height: 56px;
-  padding: 0 18px; border-radius: 10px;
+  height: 56px;
+  display: flex; align-items: center;
+  padding: 0 14px; border-radius: 10px;
   font-size: 22px; color: var(--text-dim);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.pl-thumb {
+  width: 40px; height: 40px; flex: none;
+  margin-right: 14px; border-radius: 6px;
+  background: #253243 center/cover no-repeat;
+}
+.pl-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl-row.sel { background: rgba(255,255,255,0.10); color: var(--text); font-weight: bold; }
 #pl-hint {
   height: 44px; line-height: 44px; text-align: center;
@@ -691,12 +697,12 @@ function openPlaylists() {
   loadPlaylists(false);
 }
 
-/* Back button: Playlists -> Mixer, or Mixer/NowPlaying -> Playlists. */
+/* Back button: Playlists -> Now Playing, or Mixer/NowPlaying -> Playlists. */
 function handleBack() {
   if (STATE.view === 'playlists') {
-    STATE.view = 'mixer';
+    STATE.view = 'np';
     applyView();
-    scheduleReturnToNowPlaying();
+    cancelReturnToNowPlaying();   // Now Playing is home; nothing to revert to
   } else {
     openPlaylists();
   }
@@ -765,9 +771,9 @@ async function playSelectedPlaylist() {
   if (ok) {
     playlistFlashTimer = setTimeout(() => {
       hideToast();
-      STATE.view = 'mixer';
+      STATE.view = 'np';
       applyView();
-      scheduleReturnToNowPlaying();
+      cancelReturnToNowPlaying();
       pollSpotify();
     }, 2000);
   } else {
@@ -782,6 +788,7 @@ function buildPlaylistRows() {
   for (let i = 0; i < PL_VISIBLE_ROWS; i++) {
     const row = document.createElement('div');
     row.className = 'pl-row';
+    row.innerHTML = '<div class="pl-thumb"></div><div class="pl-name"></div>';
     row.addEventListener('click', (function (slot) {
       return function () {
         const idx = playlistState.scrollTop + slot;
@@ -796,6 +803,21 @@ function buildPlaylistRows() {
   plRowsBuilt = true;
 }
 
+/* Covers go through the server's art proxy — the device can't reach the Spotify
+   CDN. Only reassign when the URL actually changes: scrolling reuses the same
+   six row elements, and Chromium here runs with a 1-byte disk cache, so a
+   redundant assignment means a real refetch. */
+function setThumb(el, url, visible) {
+  if (!el) return;
+  const want = visible ? 'block' : 'none';
+  if (el.style.display !== want) el.style.display = want;
+  const img = url ? ('url("' + SERVER + '/spotify/art?u=' + encodeURIComponent(url) + '")') : 'none';
+  if (el.dataset.img !== img) {
+    el.dataset.img = img;
+    el.style.backgroundImage = img;
+  }
+}
+
 function renderPlaylists() {
   buildPlaylistRows();
   const rows = document.querySelectorAll('#pl-list .pl-row');
@@ -807,14 +829,18 @@ function renderPlaylists() {
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    const nameEl = row.querySelector('.pl-name');
+    const thumbEl = row.querySelector('.pl-thumb');
     if (placeholder !== null) {
-      setText(row, i === 0 ? placeholder : '');
+      setText(nameEl, i === 0 ? placeholder : '');
+      setThumb(thumbEl, null, false);
       row.classList.remove('sel');
       continue;
     }
     const idx = st.scrollTop + i;
     const it = st.items[idx];
-    setText(row, it ? (it.name || '') : '');
+    setText(nameEl, it ? (it.name || '') : '');
+    setThumb(thumbEl, it ? it.image_url : null, !!it);
     row.classList.toggle('sel', !!it && idx === st.selected);
   }
 }

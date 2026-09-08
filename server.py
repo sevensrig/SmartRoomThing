@@ -418,18 +418,24 @@ def spotify_now_playing():
 # Album art cache. Each image is ~90 KB and costs ~109ms of server CPU to fetch
 # and proxy; the Car Thing re-requests it whenever the track changes and albums
 # repeat, so keeping the last few makes those free.
+ART_HOST_SUFFIXES = (".scdn.co", ".spotifycdn.com")
 _ART_CACHE = collections.OrderedDict()   # url -> (content_type, bytes)
-_ART_CACHE_MAX = 16                      # ~1.5 MB worst case
+_ART_CACHE_MAX = 48                      # album art plus a list of playlist covers
 _ART_LOCK = threading.Lock()
 
 
 @app.route("/spotify/art", methods=["GET"])
 def spotify_art():
-    """Proxy album art (Spotify CDN), since the Car Thing has no internet to
-    load https://i.scdn.co images directly. Only Spotify CDN hosts are allowed."""
+    """Proxy album art and playlist covers, since the Car Thing has no internet
+    of its own.
+
+    Restricted to Spotify's own CDNs so this can't be used as an open relay.
+    Album art is on i.scdn.co; playlist covers are spread across mosaic.scdn.co
+    (auto-generated four-square covers) and image-cdn-*.spotifycdn.com
+    (user-uploaded ones), so both suffixes are needed."""
     url = request.args.get("u", "")
     parsed = urllib.parse.urlparse(url)
-    if parsed.scheme != "https" or not parsed.netloc.endswith(".scdn.co"):
+    if parsed.scheme != "https" or not parsed.netloc.endswith(ART_HOST_SUFFIXES):
         return ("forbidden", 403)
     def _art_response(ctype, data, cached):
         out = make_response(data)
@@ -555,11 +561,17 @@ def spotify_playlists():
     for it in data.get("items", []):
         if not it:
             continue  # Spotify occasionally returns null items for dead playlists
-        images = it.get("images") or []
+        # Prefer the smallest cover Spotify offers. Rows render it at 40px, and
+        # most playlists expose 640/300/60 — proxying the 60px variant costs a
+        # couple of KB instead of ~90. Mosaic covers report no dimensions at all,
+        # in which case there is only one to take.
+        images = [i for i in (it.get("images") or []) if i.get("url")]
+        sized = [i for i in images if isinstance(i.get("width"), int)]
+        pick = min(sized, key=lambda i: i["width"]) if sized else (images[-1] if images else None)
         out.append({
             "id": it.get("uri"),
             "name": it.get("name", ""),
-            "image_url": images[0].get("url") if images else None,
+            "image_url": pick.get("url") if pick else None,
         })
     return jsonify(out)
 
