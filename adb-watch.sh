@@ -15,7 +15,8 @@
 set -u
 
 PORT=5005
-CHECK_EVERY=5          # seconds between health checks
+CHECK_EVERY=5          # seconds between presence checks (cheap, host-side only)
+VERIFY_EVERY=60        # seconds between end-to-end checks while the tunnel is up
 FAILS_BEFORE_RESET=3   # failed re-establishes before restarting the adb server
 ADB="$(command -v adb || echo /usr/bin/adb)"
 
@@ -25,6 +26,10 @@ device_present() {
   "$ADB" devices 2>/dev/null | grep -q "$(printf '\t')device"
 }
 
+# Spawns a shell and curl ON THE DEVICE, so this is the expensive part of the
+# script. Once the tunnel is known good we only re-verify every VERIFY_EVERY
+# seconds; a device appearing or disappearing is still caught within CHECK_EVERY
+# by the cheap host-side presence check, and re-verified immediately.
 tunnel_ok() {
   local code
   code="$("$ADB" shell "curl -s -m 4 -o /dev/null -w '%{http_code}' http://localhost:$PORT/presets" 2>/dev/null | tr -dc '0-9')"
@@ -42,19 +47,24 @@ if [ ! -x "$ADB" ]; then
   exit 1
 fi
 
-log "watching for the Car Thing (health check every ${CHECK_EVERY}s on port $PORT)"
+log "watching for the Car Thing (presence every ${CHECK_EVERY}s, end-to-end every ${VERIFY_EVERY}s, port $PORT)"
 
 fails=0
-state=""   # last logged state, so we log transitions rather than every poll
+state=""       # last logged state, so we log transitions rather than every poll
+last_verify=0  # epoch seconds of the last end-to-end check
 
 while true; do
+  now=$(date +%s)
   if ! device_present; then
     [ "$state" = absent ] || log "device not on USB — waiting"
     state=absent
     fails=0
+  elif [ "$state" = up ] && [ $((now - last_verify)) -lt "$VERIFY_EVERY" ]; then
+    :   # device still present and the tunnel verified recently — nothing to do
   elif tunnel_ok; then
     [ "$state" = up ] || log "tunnel up (device -> Pi :$PORT)"
     state=up
+    last_verify=$now
     fails=0
   else
     [ "$state" = down ] || log "tunnel down — re-establishing"
@@ -63,6 +73,7 @@ while true; do
     if tunnel_ok; then
       log "tunnel restored"
       state=up
+      last_verify=$now
       fails=0
     else
       fails=$((fails + 1))
