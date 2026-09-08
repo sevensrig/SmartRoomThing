@@ -16,8 +16,7 @@
     },
     "chromecast": {
       "ip_address": "10.0.0.52",
-      "name": "Living Room TV",
-      "only_when_casting": true
+      "name": "Living Room TV"
     }
   },
   "presets": {

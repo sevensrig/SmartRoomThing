@@ -559,6 +559,11 @@ async function adjustVolume(delta) {
       const j = await r.json();
       if (j && j.volumes) STATE.volumes = j.volumes;
       if (j && j.unavailable) STATE.unavailable = j.unavailable;
+      // The server refuses some writes (a TV that only moves with the group).
+      // Say so rather than letting the dial feel dead.
+      if (j && j.ok === false && j.error) {
+        showToast(j.error === 'via group' ? 'CAST FOLLOWS THE GROUP' : j.error.toUpperCase(), 1600);
+      }
       renderMixer();
     }
   } catch (e) {
