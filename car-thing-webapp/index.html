@@ -643,6 +643,8 @@ function fmtTime(ms) {
 
 /* Elapsed position, extrapolated between polls so the bar moves smoothly
    without polling the server every second. */
+const RESTART_THRESHOLD_MS = 5000;
+
 function currentProgressMs() {
   const s = STATE.spotify;
   let ms = s.progressMs;
@@ -916,7 +918,20 @@ function bindKeyboard() {
     scheduleReturnToNowPlaying();
   });
 
-  document.getElementById('btn-prev').addEventListener('click', () => spotifyControl('previous'));
+  // Like most players: past the first few seconds, back restarts the song; a
+  // second tap (now near 0:00) goes to the previous track.
+  document.getElementById('btn-prev').addEventListener('click', () => {
+    const s = STATE.spotify;
+    if (s.track && currentProgressMs() > RESTART_THRESHOLD_MS) {
+      // Optimistic, so a quick second tap sees 0:00 and skips back.
+      s.progressMs = 0;
+      s.at = Date.now();
+      renderNowPlaying();
+      spotifyControl('restart');
+    } else {
+      spotifyControl('previous');
+    }
+  });
   document.getElementById('btn-next').addEventListener('click', () => spotifyControl('next'));
   document.getElementById('btn-playpause').addEventListener('click', () => {
     const s = STATE.spotify;

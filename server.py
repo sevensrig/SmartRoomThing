@@ -520,6 +520,11 @@ def spotify_previous():
     return _spotify_command("POST", "previous")
 
 
+@app.route("/spotify/restart", methods=["POST"])
+def spotify_restart():
+    return _spotify_command("PUT", "seek?position_ms=0")
+
+
 def _spotify_fetch_devices(token):
     """Return the raw Spotify Connect devices array. Raises on transport error."""
     req = urllib.request.Request(
