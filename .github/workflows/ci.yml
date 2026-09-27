@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Server (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.13"]   # what the Pi runs
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: ruff check --output-format=github .
+      - name: Test
+        run: pytest -v
+
+  webapp:
+    name: Webapp (Chromium 69 compatibility)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: JavaScript — syntax and web APIs Chromium 69 lacks
+        run: npm run lint:js
+      - name: CSS — properties Chromium 69 lacks
+        run: npm run lint:css
+
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: ShellCheck
+        # backlight_watch.sh runs under the Car Thing's busybox sh, so it is
+        # checked as POSIX sh by its shebang, not as bash.
+        run: shellcheck adb-watch.sh monitor_watch.sh car-thing-webapp/backlight_watch.sh
