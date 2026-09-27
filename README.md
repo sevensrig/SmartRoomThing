@@ -77,7 +77,7 @@ Then create the virtualenv and install the Python packages:
 cd ~/SmartRoomThing                 # adjust if you cloned elsewhere
 python3 -m venv venv
 ./venv/bin/pip install --upgrade pip
-./venv/bin/pip install flask pychromecast
+./venv/bin/pip install -r requirements.txt   # pinned to the versions the Pi runs
 ```
 
 > On a Pi 2 the `pychromecast` install pulls in `zeroconf`/`protobuf` and can
@@ -242,6 +242,30 @@ With both enabled, powering on the Pi brings up the server and the tunnel with n
 intervention — the Car Thing reaches Now Playing about a minute after boot.
 
 To turn auto-start back off: `sudo systemctl disable volumepresets adb-watch`.
+
+---
+
+## Checks and tests
+
+Every pull request runs `.github/workflows/ci.yml`:
+
+- **Server:** `ruff` and `pytest` on Python 3.13, the Pi's version. The tests
+  swap every Cast connection for a fake and every Spotify call for a stub, and
+  point the server at a throwaway config through `VOLUMEPRESETS_CONFIG`, so they
+  never touch a speaker, the network, or the real `presets.json`.
+- **Webapp:** ESLint and Stylelint checks against **Chromium 69**, the engine the
+  Car Thing's kiosk runs. They fail on syntax (`?.`, `??`), web APIs
+  (`structuredClone`, `Array.at`) and CSS (flexbox `gap`, `backdrop-filter`,
+  `aspect-ratio`) that would silently break on the device.
+- **Shell:** ShellCheck on the watchdog scripts.
+
+Run them locally:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/ruff check . && .venv/bin/pytest
+npm ci && npm run lint
+```
 
 ---
 

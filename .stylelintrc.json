@@ -1,0 +1,13 @@
+{
+  "customSyntax": "postcss-html",
+  "plugins": ["stylelint-no-unsupported-browser-features"],
+  "rules": {
+    "plugin/no-unsupported-browser-features": [true, {
+      "severity": "error",
+      "ignore": ["css-overflow"]
+    }],
+    "property-disallowed-list": [["aspect-ratio", "inset", "container-type", "container-name"], {
+      "message": "Chromium 69 on the Car Thing does not support \"%s\""
+    }]
+  }
+}

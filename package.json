@@ -1,0 +1,23 @@
+{
+  "name": "smartroomthing-webapp-checks",
+  "private": true,
+  "description": "Lint the Car Thing webapp against the Chromium 69 it actually runs on.",
+  "browserslist": [
+    "chrome 69"
+  ],
+  "scripts": {
+    "lint": "npm run lint:js && npm run lint:css",
+    "lint:js": "eslint car-thing-webapp/index.html",
+    "lint:css": "stylelint car-thing-webapp/index.html"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "eslint-plugin-compat": "^7.0.2",
+    "eslint-plugin-html": "^8.2.1",
+    "globals": "^17.12.0",
+    "postcss-html": "^2.0.0",
+    "stylelint": "^17.15.0",
+    "stylelint-no-unsupported-browser-features": "^8.1.2"
+  }
+}

@@ -13,21 +13,24 @@ own); that logic is unchanged.
 
 import base64
 import collections
+import http.client
 import json
 import os
-import time
 import sys
 import threading
-import uuid
-import http.client
-import urllib.request
+import time
 import urllib.error
 import urllib.parse
+import urllib.request
+import uuid
+
 import pychromecast
-from flask import Flask, jsonify, request, send_from_directory, make_response
+from flask import Flask, jsonify, make_response, request, send_from_directory
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PRESETS_PATH = os.path.join(SCRIPT_DIR, "presets.json")
+# Overridable so the test suite can point at a throwaway copy instead of the
+# real presets.json (which /preset/<id>/save rewrites).
+PRESETS_PATH = os.environ.get("VOLUMEPRESETS_CONFIG") or os.path.join(SCRIPT_DIR, "presets.json")
 WEBAPP_DIR = os.path.join(SCRIPT_DIR, "car-thing-webapp")
 
 with open(PRESETS_PATH, "r") as f:
@@ -775,28 +778,32 @@ def _volume_writer(speaker_key):
             VOL_TARGETS[speaker_key] = None
         if volume is None:
             continue
+        _write_volume(speaker_key, volume)
 
-        for attempt in (0, 1):
-            cast = CASTS.get(speaker_key)
-            if cast is None:
-                cast = CASTS[speaker_key] = _connect_speaker(speaker_key)
-            if cast is None:
-                _note_write_error(speaker_key, "offline")
-                break
-            try:
-                with CAST_LOCKS[speaker_key]:
-                    cast.set_volume(volume)
-                print(f"[{speaker_key}] -> {volume:.2f}")
-                _note_write_error(speaker_key, None)
-                break
-            except Exception as e:
-                # A dead pychromecast socket raises with an empty str(), so log
-                # the type or the reason is just blank.
-                reason = type(e).__name__ + (f": {e}" if str(e) else "")
-                tail = " — reconnecting" if attempt == 0 else " — giving up until the next write"
-                print(f"[{speaker_key}] set_volume failed ({reason}){tail}")
-                _note_write_error(speaker_key, "write failed")
-                _drop_connection(speaker_key)
+
+def _write_volume(speaker_key, volume):
+    """One write to one speaker, reconnecting once if the connection is dead."""
+    for attempt in (0, 1):
+        cast = CASTS.get(speaker_key)
+        if cast is None:
+            cast = CASTS[speaker_key] = _connect_speaker(speaker_key)
+        if cast is None:
+            _note_write_error(speaker_key, "offline")
+            break
+        try:
+            with CAST_LOCKS[speaker_key]:
+                cast.set_volume(volume)
+            print(f"[{speaker_key}] -> {volume:.2f}")
+            _note_write_error(speaker_key, None)
+            break
+        except Exception as e:
+            # A dead pychromecast socket raises with an empty str(), so log
+            # the type or the reason is just blank.
+            reason = type(e).__name__ + (f": {e}" if str(e) else "")
+            tail = " — reconnecting" if attempt == 0 else " — giving up until the next write"
+            print(f"[{speaker_key}] set_volume failed ({reason}){tail}")
+            _note_write_error(speaker_key, "write failed")
+            _drop_connection(speaker_key)
 
 
 def _start_volume_writers():
