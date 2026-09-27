@@ -720,8 +720,48 @@ VOL_WAKE = {key: threading.Event() for key in SPEAKERS}
 VOL_TARGET_LOCK = threading.Lock()
 
 
+# Why the last write to each speaker failed, or None if it succeeded. Since
+# writes are asynchronous the HTTP response can no longer carry this, so it is
+# reported through /status instead — see _speaker_unavailable.
+WRITE_ERRORS = {key: None for key in SPEAKERS}
+WRITE_ERROR_LOCK = threading.Lock()
+
+
+def _note_write_error(speaker_key, reason):
+    with WRITE_ERROR_LOCK:
+        WRITE_ERRORS[speaker_key] = reason
+
+
+def _safe_disconnect(cast):
+    try:
+        cast.disconnect()
+    except Exception:
+        pass
+
+
+def _drop_connection(speaker_key):
+    """Forget a speaker's connection so the next write reopens it.
+
+    The disconnect runs on a throwaway thread: tearing down an already-dead
+    socket can block, and the writer must not stall on it.
+    """
+    cast = CASTS.get(speaker_key)
+    CASTS[speaker_key] = None
+    if cast is not None:
+        threading.Thread(target=_safe_disconnect, args=(cast,),
+                         name=f"disc-{speaker_key}", daemon=True).start()
+
+
 def _volume_writer(speaker_key):
-    """Apply the newest queued target for one speaker, forever."""
+    """Apply the newest queued target for one speaker, forever.
+
+    Connections are opened once at startup, and a speaker that drops off the
+    network later leaves a stale object behind whose every write throws — while
+    cast.status keeps serving the last cached levels, so nothing looks wrong.
+    That silently disabled volume control until the service was restarted. Each
+    write now gets two attempts: if the first fails the connection is dropped and
+    reopened, so turning the dial is enough to recover.
+    """
     while True:
         VOL_WAKE[speaker_key].wait()
         VOL_WAKE[speaker_key].clear()
@@ -730,16 +770,28 @@ def _volume_writer(speaker_key):
             VOL_TARGETS[speaker_key] = None
         if volume is None:
             continue
-        cast = CASTS.get(speaker_key)
-        if cast is None:
-            print(f"[{speaker_key}] not connected — skipping (target {volume:.2f})")
-            continue
-        try:
-            with CAST_LOCKS[speaker_key]:
-                cast.set_volume(volume)
-            print(f"[{speaker_key}] -> {volume:.2f}")
-        except Exception as e:
-            print(f"[{speaker_key}] set_volume failed: {e}")
+
+        for attempt in (0, 1):
+            cast = CASTS.get(speaker_key)
+            if cast is None:
+                cast = CASTS[speaker_key] = _connect_speaker(speaker_key)
+            if cast is None:
+                _note_write_error(speaker_key, "offline")
+                break
+            try:
+                with CAST_LOCKS[speaker_key]:
+                    cast.set_volume(volume)
+                print(f"[{speaker_key}] -> {volume:.2f}")
+                _note_write_error(speaker_key, None)
+                break
+            except Exception as e:
+                # A dead pychromecast socket raises with an empty str(), so log
+                # the type or the reason is just blank.
+                reason = type(e).__name__ + (f": {e}" if str(e) else "")
+                tail = " — reconnecting" if attempt == 0 else " — giving up until the next write"
+                print(f"[{speaker_key}] set_volume failed ({reason}){tail}")
+                _note_write_error(speaker_key, "write failed")
+                _drop_connection(speaker_key)
 
 
 def _start_volume_writers():
@@ -851,7 +903,14 @@ def _speaker_unavailable(key):
     cast = CASTS.get(key)
     if cast is None:
         return "offline"
-    return None
+    # A dropped socket is visible straight away, without waiting for a write to
+    # fail — cast.status would otherwise keep serving stale cached levels and the
+    # fader would look live.
+    sock = getattr(cast, "socket_client", None)
+    if sock is not None and getattr(sock, "is_connected", True) is False:
+        return "offline"
+    with WRITE_ERROR_LOCK:
+        return WRITE_ERRORS.get(key)
 
 
 def _unavailable_map():
