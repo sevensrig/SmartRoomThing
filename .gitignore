@@ -4,6 +4,7 @@ presets.json
 
 # Python
 venv/
+.venv/
 __pycache__/
 *.pyc
 
@@ -12,3 +13,8 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# CI tooling
+node_modules/
+.pytest_cache/
+.ruff_cache/

@@ -1,0 +1,11 @@
+[tool.ruff]
+target-version = "py313"   # the Pi's interpreter
+line-length = 110
+
+[tool.ruff.lint]
+# pyflakes + pycodestyle errors, plus bugbear and import order.
+select = ["E", "F", "W", "B", "I"]
+ignore = ["E501"]           # long log lines and comments are fine here
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
