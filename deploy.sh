@@ -106,7 +106,7 @@ apply() {
 
   if changed requirements.txt; then
     log "installing Python dependencies"
-    venv/bin/pip install -q -r requirements.txt || return 1
+    venv/bin/pip install -q --disable-pip-version-check -r requirements.txt || return 1
   fi
   if changed server.py requirements.txt; then
     log "restarting volumepresets"
@@ -153,7 +153,7 @@ rollback() {
   local ok=0 entry src dest prog
   git reset -q --hard "$PREV" || ok=1
   if changed requirements.txt; then
-    venv/bin/pip install -q -r requirements.txt || ok=1
+    venv/bin/pip install -q --disable-pip-version-check -r requirements.txt || ok=1
   fi
   # Restart unconditionally: whatever state the failed deploy left it in, the
   # server must end up running the previous code.
