@@ -692,8 +692,15 @@ async function fetchConfig() {
 
 async function fetchStatus() {
   try {
+    const sent = Date.now();
     const r = await fetch(SERVER + '/status', { cache: 'no-store' });
     const j = await r.json();
+    if (typeof j.now_ms === 'number') {
+      // Pi time minus ours, taken at the midpoint of the round trip.
+      piClock.skewMs = j.now_ms - (sent + Date.now()) / 2;
+      piClock.offsetMin = j.utc_offset_min || 0;
+      piClock.known = true;
+    }
     STATE.activePreset = j.active_preset;
     if (j.volumes) STATE.volumes = j.volumes;
     STATE.unavailable = j.unavailable || {};
@@ -1032,6 +1039,21 @@ let clockBuilt = false;
 let clockTimer = null;
 let blinkTimer = null;
 const clockLast = { h: null, m: null, s: null, phase: null };
+
+/* The Car Thing can't tell time: no network time, no RTC, no timezone, so its
+   clock restarts at 2015-01-01 UTC on every boot. The Pi's is right, and every
+   /status poll reports it (see fetchStatus). piNow() returns a Date whose UTC
+   fields read as the Pi's local wall-clock time, so the clock code below uses
+   the getUTC*() methods throughout. Until the first poll lands it falls back
+   to the device's own clock. */
+const piClock = { known: false, skewMs: 0, offsetMin: 0 };
+function piNow() {
+  if (!piClock.known) {
+    const d = new Date();
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  }
+  return new Date(Date.now() + piClock.skewMs + piClock.offsetMin * 60000);
+}
 let sceneFile;   // file of the scene currently shown or loading; null = analog
 
 function svgEl(tag, attrs) {
@@ -1094,7 +1116,7 @@ function setHand(id, deg) {
 }
 
 function renderClock(d) {
-  const h = d.getHours(), m = d.getMinutes(), s = d.getSeconds();
+  const h = d.getUTCHours(), m = d.getUTCMinutes(), s = d.getUTCSeconds();
   if (s === clockLast.s && m === clockLast.m && h === clockLast.h) return;
   clockLast.s = s;
   const el = clockEl();
@@ -1130,20 +1152,20 @@ function renderClock(d) {
 }
 
 function renderDigital(d) {
-  const h = d.getHours(), m = d.getMinutes();
+  const h = d.getUTCHours(), m = d.getUTCMinutes();
   setText(document.getElementById('cd-hm'), ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m);
   setText(document.getElementById('cd-ampm'), h < 12 ? 'AM' : 'PM');
   setText(document.getElementById('cd-date'),
-    DAY_NAMES[d.getDay()] + '  ' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate());
+    DAY_NAMES[d.getUTCDay()] + '  ' + MONTH_NAMES[d.getUTCMonth()] + ' ' + d.getUTCDate());
 }
 
 function sceneFor(d) {
-  const h = d.getHours();
+  const h = d.getUTCHours();
   let scene = CLOCK_SCENES[CLOCK_SCENES.length - 1];   // before the first slot = last slot, wrapped
   for (let i = 0; i < CLOCK_SCENES.length; i++) {
     if (h >= CLOCK_SCENES[i].from) scene = CLOCK_SCENES[i];
   }
-  const month = d.getMonth();
+  const month = d.getUTCMonth();
   const winter = month === 11 || month <= 1;
   return { scene: scene, file: (winter && scene.winter) || scene.file };
 }
@@ -1207,9 +1229,9 @@ function drawWall(img, fit) {
 // Re-armed against the wall clock each time, so the second hand lands on the
 // second instead of drifting with setInterval.
 function tickClock() {
-  const d = new Date();
+  const d = piNow();
   renderClock(d);
-  clockTimer = setTimeout(tickClock, 1010 - d.getMilliseconds());
+  clockTimer = setTimeout(tickClock, 1010 - d.getUTCMilliseconds());
 }
 
 function setClockActive(on) {
