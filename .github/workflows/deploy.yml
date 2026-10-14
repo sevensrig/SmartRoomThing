@@ -1,0 +1,66 @@
+name: Deploy
+
+# Ships main to the Pi after CI passes on it. Can also be run by hand from the
+# Actions tab, e.g. to redeploy after the Pi was offline.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, and never cancel one halfway. deploy.sh would roll
+# back, but there's no reason to make it.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # lets Tailscale verify this job's identity; no Tailscale secret is stored
+
+jobs:
+  deploy:
+    # Only after CI succeeded on a push to main, never for PR runs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      PI_HOST: ${{ vars.PI_HOST || 'birdpi' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: ci   # only for ci/known_hosts
+
+      - name: Join the tailnet
+        # Workload identity federation: GitHub's OIDC token for this job is
+        # exchanged for a short-lived Tailscale key. The runner joins as an
+        # ephemeral tag:ci node and is removed when the job ends.
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:ci
+          ping: ${{ env.PI_HOST }}
+
+      - name: Set up the deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned host key: refuse anything that isn't the real Pi.
+          sed "s/^birdpi /$PI_HOST /" ci/known_hosts > ~/.ssh/known_hosts
+
+      - name: Deploy ${{ env.SHA }}
+        # On the Pi, this key can only run ci/deploy-from-ci.sh, which checks
+        # the SHA is on main and runs deploy.sh (health checks, rollback).
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 "srigsrini@$PI_HOST" "$SHA"

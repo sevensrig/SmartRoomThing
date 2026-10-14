@@ -1,0 +1,25 @@
+// Tailscale access policy for the tailnet that birdpi and CI share.
+// Paste into https://login.tailscale.com/admin/acls (it replaces the default).
+//
+// Kept in the repo so the network's access rules are reviewed like code.
+{
+  "tagOwners": {
+    "tag:birdpi": ["autogroup:admin"],   // the Pi, tagged so it's not tied to a user login
+    "tag:ci":     ["autogroup:admin"],   // GitHub Actions runners, joined per job
+  },
+
+  "grants": [
+    // Your own devices (laptop, phone) can reach everything, as with the default policy.
+    {"src": ["autogroup:member"], "dst": ["*"], "ip": ["*"]},
+
+    // A CI runner can reach the Pi on SSH and nothing else: no other port, no
+    // other device, and not each other.
+    {"src": ["tag:ci"], "dst": ["tag:birdpi"], "ip": ["tcp:22"]},
+  ],
+
+  // Tailscale checks these when the policy is saved; a save that would let CI
+  // reach anything beyond SSH on the Pi is rejected.
+  "tests": [
+    {"src": "tag:ci", "accept": ["tag:birdpi:22"], "deny": ["tag:birdpi:5005", "tag:birdpi:80"]},
+  ],
+}

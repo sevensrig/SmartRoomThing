@@ -271,6 +271,53 @@ them. Every run is logged to `.deploy-history`.
 
 ---
 
+## Automatic deploys
+
+Merging to `main` deploys it. `.github/workflows/deploy.yml` waits for CI to pass
+on `main`, joins the Pi's Tailscale network, and runs `deploy.sh` over SSH, with
+its health checks and rollback. You can also run it by hand from the Actions tab.
+
+There are four layers of access control, so no single leak gets far:
+
+| Layer | What it limits |
+|---|---|
+| GitHub `production` environment | Only runs from `main` can deploy |
+| Tailscale workload identity | No Tailscale secret is stored. GitHub proves the job's identity, and only jobs in the `production` environment get in, as a temporary `tag:ci` device |
+| Tailscale access policy (`ci/tailscale-policy.hujson`) | `tag:ci` reaches only SSH on the Pi, nothing else |
+| SSH key restricted to one command | The key can only run `ci/deploy-from-ci.sh`, which accepts only a commit already on `main` |
+
+The Pi's SSH host key is pinned in `ci/known_hosts`, so CI won't talk to anything else.
+
+### One-time setup
+
+1. **Access policy.** In the Tailscale admin console under *Access controls*,
+   replace the policy with `ci/tailscale-policy.hujson`.
+2. **Put the Pi on the tailnet.** Open the URL this prints and sign in:
+   ```bash
+   ssh birdpi 'sudo tailscale up --advertise-tags=tag:birdpi --hostname=birdpi'
+   ```
+3. **Deploy key and environment** (run on your Mac; re-run any time to rotate the key):
+   ```bash
+   ci/setup-deploy-key.sh
+   ```
+4. **Trust credential.** In the Tailscale admin console, add a workload identity
+   federation credential for GitHub Actions with:
+   - subject `repo:sevensrig/SmartRoomThing:environment:production`
+   - the *Auth Keys* write scope
+   - tag `tag:ci`
+
+   Then store the two values it gives you:
+   ```bash
+   gh secret set TS_OAUTH_CLIENT_ID --env production
+   gh secret set TS_AUDIENCE --env production
+   ```
+
+The Pi's checkout needs `ci/deploy-from-ci.sh` before CI can call it. After the
+first merge that includes it, run `ssh birdpi 'SmartRoomThing/deploy.sh'` once by
+hand.
+
+---
+
 ## Checks and tests
 
 Every pull request runs `.github/workflows/ci.yml`:
