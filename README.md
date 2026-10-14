@@ -245,6 +245,32 @@ To turn auto-start back off: `sudo systemctl disable volumepresets adb-watch`.
 
 ---
 
+## Deploying updates
+
+Once the Pi is set up, ship changes with `deploy.sh` instead of copying files by
+hand. It runs on the Pi:
+
+```bash
+ssh birdpi 'SmartRoomThing/deploy.sh'            # deploy origin/main
+ssh birdpi 'SmartRoomThing/deploy.sh 466cfa6'    # deploy, or roll back to, a commit
+```
+
+It touches only what changed. The server restarts only if `server.py` or
+`requirements.txt` changed, and a file goes to the Car Thing only if the copy on
+the device differs, always through the remount-and-sync wrapper. It then checks
+that the deploy actually works, using real requests:
+
+1. `GET /status` on the Pi returns 200
+2. every pushed file's checksum on the Car Thing matches the repo
+3. `GET /ping` from **on** the Car Thing, through the USB tunnel, returns 204
+
+If any check fails, it puts the previous commit and the Car Thing's previous
+files back, restarts what it changed, and checks again. It refuses to start if
+tracked files on the Pi have uncommitted changes, since a deploy would overwrite
+them. Every run is logged to `.deploy-history`.
+
+---
+
 ## Checks and tests
 
 Every pull request runs `.github/workflows/ci.yml`:

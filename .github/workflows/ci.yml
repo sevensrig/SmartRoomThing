@@ -55,4 +55,4 @@ jobs:
       - name: ShellCheck
         # backlight_watch.sh runs under the Car Thing's busybox sh, so it is
         # checked as POSIX sh by its shebang, not as bash.
-        run: shellcheck adb-watch.sh monitor_watch.sh car-thing-webapp/backlight_watch.sh
+        run: shellcheck deploy.sh adb-watch.sh monitor_watch.sh car-thing-webapp/backlight_watch.sh

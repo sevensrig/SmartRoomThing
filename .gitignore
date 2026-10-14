@@ -2,6 +2,15 @@
 # Copy presets.example.json -> presets.json and fill in your own values.
 presets.json
 
+# Dashboard config. Separate from presets.json so the two services never share
+# a blast radius; it will hold the calendar/mail/Slack credentials.
+# Copy dashboard.example.json -> dashboard.json and fill in your own values.
+dashboard.json
+
+# Sleeper's bulk player map, projected down to names/positions. Rebuilt
+# weekly by dashboard.playercache; derived data, not worth versioning.
+player_cache.json
+
 # Python
 venv/
 .venv/
@@ -18,3 +27,6 @@ __pycache__/
 node_modules/
 .pytest_cache/
 .ruff_cache/
+
+# Deploy log written by deploy.sh
+.deploy-history
