@@ -30,3 +30,8 @@ node_modules/
 
 # Deploy log written by deploy.sh
 .deploy-history
+
+# Peanuts character art for the idle clock. Copyrighted and this repo is
+# public, so it stays local. It lives untracked on the Pi, and deploy.sh pushes
+# it to the Car Thing (see "Deploying updates" in the README).
+car-thing-webapp/art/
