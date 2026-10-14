@@ -4,6 +4,17 @@ def test_ping_is_an_empty_204(client):
     assert r.data == b""
 
 
+def test_status_reports_the_pis_time_for_the_idle_clock(client):
+    # The Car Thing's own clock is wrong after every boot; the webapp uses this.
+    import time
+
+    before = time.time() * 1000
+    j = client.get("/status").get_json()
+    after = time.time() * 1000
+    assert before - 1 <= j["now_ms"] <= after + 1
+    assert j["utc_offset_min"] == time.localtime().tm_gmtoff // 60
+
+
 def test_responses_allow_the_car_thing_origin(client):
     # The webapp loads from file:// on the device, so every call is cross-origin.
     assert client.get("/ping").headers["Access-Control-Allow-Origin"] == "*"

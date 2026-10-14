@@ -1023,6 +1023,11 @@ def status():
         "active_preset": STATE["active_preset"],
         "volumes": STATE["volumes"],
         "unavailable": _unavailable_map(),
+        # The Car Thing has no network time, no RTC and no timezone: its clock
+        # starts at 2015-01-01 UTC on every boot. The idle clock tells time by
+        # the Pi's instead, in the Pi's timezone (DST included).
+        "now_ms": int(time.time() * 1000),
+        "utc_offset_min": time.localtime().tm_gmtoff // 60,
     })
 
 
