@@ -162,17 +162,10 @@ adb shell mount -o remount,rw /
 # Push the file directly (pushing the folder nests a stale copy).
 adb push car-thing-webapp/index.html /usr/share/qt-superbird-app/webapp/index.html
 
-# The idle clock's hand-lettered font.
+# The idle clock's font. Later updates, and the clock's art, go through
+# deploy.sh (see "Deploying updates").
 adb shell mkdir -p /usr/share/qt-superbird-app/webapp/fonts
 adb push car-thing-webapp/fonts/Schoolbell.woff2 /usr/share/qt-superbird-app/webapp/fonts/Schoolbell.woff2
-
-# Idle-clock art. car-thing-webapp/art/ is gitignored (Peanuts art is
-# copyrighted and this repo is public), so it only exists on your machine.
-# Push each file the same way; without them the clock uses its drawn fallback.
-adb shell mkdir -p /usr/share/qt-superbird-app/webapp/art/scenes
-for f in car-thing-webapp/art/*.png car-thing-webapp/art/scenes/*; do
-  [ -f "$f" ] && adb push "$f" "/usr/share/qt-superbird-app/webapp/${f#car-thing-webapp/}"
-done
 
 # Stop the kiosk Chromium serving a stale cached page after a relaunch.
 # Disable its disk cache once:
@@ -280,6 +273,21 @@ If any check fails, it puts the previous commit and the Car Thing's previous
 files back, restarts what it changed, and checks again. It refuses to start if
 tracked files on the Pi have uncommitted changes, since a deploy would overwrite
 them. Every run is logged to `.deploy-history`.
+
+### The idle clock's art
+
+The Snoopy and Woodstock pictures in `car-thing-webapp/art/` are copyrighted and
+this repo is public, so they're gitignored and never go through GitHub. Copy
+them to the Pi's checkout yourself, then deploy as usual; `deploy.sh` pushes
+whatever is in that folder to the Car Thing, checks it, and rolls it back with
+everything else:
+
+```bash
+rsync -a car-thing-webapp/art/ birdpi:SmartRoomThing/car-thing-webapp/art/
+ssh birdpi 'SmartRoomThing/deploy.sh'
+```
+
+Without the art, the clock falls back to a drawn Snoopy and Woodstock.
 
 ---
 

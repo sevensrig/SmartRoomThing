@@ -27,10 +27,18 @@ HEALTH_TIMEOUT=60   # seconds; Cast connections at startup take ~10s per speaker
 
 # Files deployed to the Car Thing: repo path, device path, supervisord program
 # to restart after a change.
+DEVICE_WEBAPP=/usr/share/qt-superbird-app/webapp
 DEVICE_FILES=(
-  "car-thing-webapp/index.html|/usr/share/qt-superbird-app/webapp/index.html|chromium"
+  "car-thing-webapp/index.html|$DEVICE_WEBAPP/index.html|chromium"
+  "car-thing-webapp/fonts/Schoolbell.woff2|$DEVICE_WEBAPP/fonts/Schoolbell.woff2|chromium"
   "car-thing-webapp/backlight_watch.sh|/usr/share/qt-superbird-app/backlight_watch.sh|dockbacklight"
 )
+
+# The idle clock's Peanuts art is copyrighted and this repo is public, so it is
+# gitignored and lives untracked on the Pi (copied there by hand; see the
+# README). Whatever is there ships with the webapp. `git reset --hard` leaves
+# untracked files alone, so it survives deploys and rollbacks.
+LOCAL_ASSET_DIR=car-thing-webapp/art
 
 log()  { echo "[deploy] $*"; }
 warn() { echo "[deploy] WARNING: $*" >&2; }
@@ -42,8 +50,17 @@ record() {
 
 # --- the Car Thing -----------------------------------------------------------
 
+add_local_assets() {
+  local f
+  while IFS= read -r f; do
+    DEVICE_FILES+=("$f|$DEVICE_WEBAPP/${f#car-thing-webapp/}|chromium")
+  done < <(find "$LOCAL_ASSET_DIR" -type f 2>/dev/null | LC_ALL=C sort)
+}
+
+# Empty if the file isn't there. The device's adb shell puts md5sum's error on
+# stdout, so keep only an actual digest.
 device_md5() {
-  adb shell md5sum "$1" 2>/dev/null | tr -d '\r' | awk '{print $1}'
+  adb shell md5sum "$1" 2>/dev/null | tr -d '\r' | awk '$1 ~ /^[0-9a-f]{32}$/ {print $1}'
 }
 
 # Any rootfs write needs the remount wrapper, and the sync: without it an
@@ -51,9 +68,34 @@ device_md5() {
 device_push() {
   local src=$1 dest=$2 rc=0
   adb shell mount -o remount,rw / || return 1
+  adb shell mkdir -p "$(dirname "$dest")" || rc=1
   adb push "$src" "$dest" >/dev/null || rc=1
   [ "$dest" = "${dest%.sh}" ] || adb shell chmod +x "$dest" || rc=1
   adb shell 'sync; sync; mount -o remount,ro /' || rc=1
+  return $rc
+}
+
+# Rollback for a file the deploy added: it wasn't on the device before.
+device_remove() {
+  local rc=0
+  adb shell mount -o remount,rw / || return 1
+  adb shell rm -f "$1" || rc=1
+  adb shell 'sync; sync; mount -o remount,ro /' || rc=1
+  return $rc
+}
+
+# Where a device file's pre-deploy copy is kept. The full path, flattened, so
+# two files with the same name in different directories can't collide.
+backup_of() {
+  echo "$BACKUP_DIR/$(echo "$1" | tr / _)"
+}
+
+# Restart each supervisord program once, however many of its files changed.
+restart_programs() {
+  local prog rc=0
+  for prog in $(printf '%s\n' "$@" | sort -u); do
+    device_restart "$prog" || rc=1
+  done
   return $rc
 }
 
@@ -120,15 +162,16 @@ apply() {
     warn "a systemd unit file changed; install it by hand (see README, Step 7)"
   fi
 
-  local entry src dest prog
+  local entry src dest prog restart=()
   for entry in "${DEVICE_FILES[@]}"; do
     IFS='|' read -r src dest prog <<<"$entry"
     [ "$(device_md5 "$dest")" = "$(md5sum "$src" | awk '{print $1}')" ] && continue
     log "pushing $src to the Car Thing"
-    device_push "$src" "$dest" || return 1
     PUSHED+=("$entry")
-    device_restart "$prog" || return 1
+    device_push "$src" "$dest" || return 1
+    restart+=("$prog")
   done
+  [ ${#restart[@]} -eq 0 ] || restart_programs "${restart[@]}" || return 1
   return 0
 }
 
@@ -160,13 +203,20 @@ rollback() {
   sudo systemctl restart volumepresets || ok=1
   changed adb-watch.sh && { sudo systemctl restart adb-watch || ok=1; }
 
+  local restart=() backup
   for entry in "${PUSHED[@]}"; do
     IFS='|' read -r src dest prog <<<"$entry"
-    local backup
-    backup="$BACKUP_DIR/$(basename "$dest")"
-    log "restoring $dest on the Car Thing"
-    { device_push "$backup" "$dest" && device_restart "$prog"; } || ok=1
+    backup="$(backup_of "$dest")"
+    if [ -f "$backup.absent" ]; then
+      log "removing $dest from the Car Thing (it is new in this deploy)"
+      device_remove "$dest" || ok=1
+    else
+      log "restoring $dest on the Car Thing"
+      device_push "$backup" "$dest" || ok=1
+    fi
+    restart+=("$prog")
   done
+  [ ${#restart[@]} -eq 0 ] || restart_programs "${restart[@]}" || ok=1
 
   if [ $ok -eq 0 ] && server_healthy && tunnel_healthy; then
     log "rolled back; ${PREV:0:7} is running and healthy"
@@ -179,6 +229,7 @@ rollback() {
 
 main() {
   cd "$REPO" || die "can't cd to $REPO"
+  add_local_assets
 
   exec 9>"$LOCK"
   flock -n 9 || die "another deploy is already running"
@@ -199,10 +250,16 @@ $(git status --short --untracked-files=no)"
   # Back up what's on the device, not what the previous commit says should be
   # there; the two have drifted before.
   BACKUP_DIR="$(mktemp -d /tmp/deploy-backup.XXXXXX)"
+  # A file this deploy adds has nothing to back up; mark it so a rollback
+  # removes it instead.
   local entry src dest prog
   for entry in "${DEVICE_FILES[@]}"; do
     IFS='|' read -r src dest prog <<<"$entry"
-    adb pull "$dest" "$BACKUP_DIR/" >/dev/null || die "couldn't back up $dest from the Car Thing"
+    if [ -z "$(device_md5 "$dest")" ]; then
+      touch "$(backup_of "$dest").absent"
+    else
+      adb pull "$dest" "$(backup_of "$dest")" >/dev/null || die "couldn't back up $dest from the Car Thing"
+    fi
   done
 
   if [ "$PREV" = "$TARGET" ]; then
