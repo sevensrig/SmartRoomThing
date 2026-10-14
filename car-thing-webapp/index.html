@@ -20,6 +20,16 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Hand-lettered face for the idle clock, in the spirit of Schulz's lettering.
+   Bundled because the Car Thing has no internet. Schoolbell, Apache License
+   2.0 (see fonts/README.md). */
+@font-face {
+  font-family: "Schoolbell";
+  src: url("fonts/Schoolbell.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+}
+
 :root {
   --bg-top:      #1b2836;
   --bg-bottom:   #0e141b;
@@ -151,6 +161,162 @@ html, body {
    near the edge still visibly registers. */
 .ctl:active { background: rgba(255,255,255,0.12); }
 .ctl:active svg { fill: var(--text-dim); }
+
+/* ---------- idle clock ----------
+ * Takes over the Now Playing screen while nothing is playing: an analog face
+ * in the style of Apple's Snoopy watch faces — halftone paper, hand-lettered
+ * numerals, Snoopy on his doghouse with Woodstock. Everything is one static
+ * SVG; the only per-second work is rotating three hands. The little bits of
+ * life (blink, chatter, a drifting leaf, Zs at night) are driven off that same
+ * tick or are short CSS transform animations on their own layers. */
+#clock {
+  display: none;
+  position: absolute; top: 0; left: 0;
+  width: 800px; height: 480px;
+  overflow: hidden;
+  background-color: #a3d6ae;
+  /* Halftone dots over a soft centre glow. */
+  background-image:
+    radial-gradient(circle, rgba(0,0,0,0.09) 1.3px, transparent 1.8px),
+    radial-gradient(ellipse at 50% 45%, rgba(255,255,255,0.38), rgba(255,255,255,0) 70%);
+  background-size: 7px 7px, 100% 100%;
+}
+#clock.morning { background-color: #f6d47a; }
+#clock.day     { background-color: #a3d6ae; }
+#clock.evening { background-color: #f3a15f; }
+#clock.night   { background-color: #7276c6; }
+
+#app.idle #now-playing-view.active { display: none; }
+#app.idle #clock { display: block; }
+/* Bezel legend in ink rather than white, so it sits on the paper. */
+#app.idle .bb-tick        { background: rgba(0,0,0,0.12); }
+#app.idle .bb-cell.on .bb-tick  { background: rgba(0,0,0,0.22); }
+#app.idle .bb-label       { color: rgba(0,0,0,0.28); }
+#app.idle .bb-cell.on .bb-label { color: rgba(0,0,0,0.42); }
+
+#clock svg { position: absolute; top: 0; left: 0; }
+
+/* Day/night poses. */
+.sleep { display: none; }
+#clock.night .awake { display: none; }
+#clock.night .sleep { display: inline; }
+.shut { display: none; }
+#clock.blink .open { display: none; }
+#clock.blink .shut { display: inline; }
+
+/* Real character art (art/*.png), positioned on the doghouse roof. The drawn
+   versions only show when that art is missing. */
+.art-img { display: none; position: absolute; }
+#clock.art .art-img { display: block; }
+#clock.art .drawn { display: none; }
+#art-snoopy { left: 317px; top: 224px; }
+/* Woodstock's art faces left, as Snoopy's does; mirrored and on Snoopy's left
+   so the two face each other. */
+#art-woodstock {
+  left: 226px; top: 296px;
+  -webkit-transform: scaleX(-1); transform: scaleX(-1);
+  will-change: transform;
+  -webkit-animation: ws-hover 3s ease-in-out infinite; animation: ws-hover 3s ease-in-out infinite;
+}
+#clock.night #art-woodstock { -webkit-animation: none; animation: none; }
+@-webkit-keyframes ws-hover {
+  0%, 100% { -webkit-transform: scaleX(-1); }
+  50% { -webkit-transform: translateY(-8px) scaleX(-1); }
+}
+@keyframes ws-hover {
+  0%, 100% { transform: scaleX(-1); }
+  50% { transform: translateY(-8px) scaleX(-1); }
+}
+#clock.art #ws-bubble { -webkit-transform: translate(-300px, -26px); transform: translate(-300px, -26px); }
+
+#ws-bubble { display: none; }
+#clock.chat #ws-bubble { display: inline; }
+#clock.night #ws-bubble { display: none; }
+#clock.hop #ws-body { -webkit-animation: ws-hop 0.5s ease-out 2; animation: ws-hop 0.5s ease-out 2; }
+@-webkit-keyframes ws-hop { 50% { -webkit-transform: translateY(-9px); } }
+@keyframes ws-hop { 50% { transform: translateY(-9px); } }
+
+/* A leaf blown across the sky now and then. Own layer, transform only. */
+.leaf {
+  position: absolute; top: 0; left: 0;
+  width: 34px; height: 22px;
+  visibility: hidden;
+  will-change: transform;
+}
+.leaf.go {
+  visibility: visible;
+  -webkit-animation: leaf-drift 9s linear 1; animation: leaf-drift 9s linear 1;
+}
+@-webkit-keyframes leaf-drift {
+  0%   { -webkit-transform: translate(830px, 120px) rotate(0deg); }
+  25%  { -webkit-transform: translate(610px, 165px) rotate(-70deg); }
+  50%  { -webkit-transform: translate(400px, 130px) rotate(-150deg); }
+  75%  { -webkit-transform: translate(190px, 185px) rotate(-230deg); }
+  100% { -webkit-transform: translate(-60px, 150px) rotate(-320deg); }
+}
+@keyframes leaf-drift {
+  0%   { transform: translate(830px, 120px) rotate(0deg); }
+  25%  { transform: translate(610px, 165px) rotate(-70deg); }
+  50%  { transform: translate(400px, 130px) rotate(-150deg); }
+  75%  { transform: translate(190px, 185px) rotate(-230deg); }
+  100% { transform: translate(-60px, 150px) rotate(-320deg); }
+}
+
+/* Wallpaper scenes: a full picture with a digital clock over it. Declared
+   after the classic rules so .wall wins where they overlap. */
+#clock-wall, #clock-digital { display: none; position: absolute; }
+#clock-wall { top: 0; left: 0; }
+#clock.wall #clock-wall,
+#clock.wall #clock-digital { display: block; }
+#clock.wall .classic { display: none; }
+
+#clock-digital {
+  top: 44px; left: 0; width: 800px;
+  padding: 0 40px;
+  text-align: center;
+  font-family: "Schoolbell", "Circular Sp UI v3 T", sans-serif;
+  color: #1d1d1d;
+  /* A soft halo keeps the time readable over any part of the picture. */
+  text-shadow: 0 0 3px #fff, 0 0 10px rgba(255,255,255,0.85), 0 0 22px rgba(255,255,255,0.6);
+}
+#clock-digital.pos-left  { text-align: left; }
+#clock-digital.pos-right { text-align: right; }
+/* Schoolbell has a single weight; synthetic bold smears it, so none here. */
+#cd-time { font-size: 128px; line-height: 1; }
+#cd-ampm { font-size: 42px; margin-left: 10px; }
+#cd-date {
+  font-size: 34px; letter-spacing: 2px; text-transform: uppercase;
+  margin-top: 2px;
+}
+#app.idle-light #clock-digital {
+  color: #fff;
+  text-shadow: 0 0 3px rgba(0,0,0,0.7), 0 0 12px rgba(0,0,0,0.55), 0 0 24px rgba(0,0,0,0.4);
+}
+#app.idle.idle-light .bb-tick        { background: rgba(255,255,255,0.16); }
+#app.idle.idle-light .bb-cell.on .bb-tick  { background: rgba(255,255,255,0.3); }
+#app.idle.idle-light .bb-label       { color: rgba(255,255,255,0.35); }
+#app.idle.idle-light .bb-cell.on .bb-label { color: rgba(255,255,255,0.55); }
+
+/* Night: Zs rising from the doghouse. */
+.zz {
+  position: absolute; top: 0; left: 0;
+  font: bold 26px "Noto Sans", sans-serif; color: #1d1d1d;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+#clock.night .zz { -webkit-animation: zz-rise 6s ease-out infinite; animation: zz-rise 6s ease-out infinite; }
+#clock.night .zz.z2 { -webkit-animation-delay: 2s; animation-delay: 2s; }
+#clock.night .zz.z3 { -webkit-animation-delay: 4s; animation-delay: 4s; }
+@-webkit-keyframes zz-rise {
+  0%   { opacity: 0; -webkit-transform: translate(470px, 250px) scale(0.6); }
+  15%  { opacity: 1; }
+  100% { opacity: 0; -webkit-transform: translate(530px, 140px) scale(1.2); }
+}
+@keyframes zz-rise {
+  0%   { opacity: 0; transform: translate(470px, 250px) scale(0.6); }
+  15%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(530px, 140px) scale(1.2); }
+}
 
 /* ---------- mixer ---------- */
 #save-btn {
@@ -294,6 +460,143 @@ html, body {
     <div id="pl-list"></div>
   </div>
 
+  <!-- Idle clock: replaces Now Playing while nothing is playing. -->
+  <div id="clock">
+    <!-- Wallpaper scenes (art/scenes/) are drawn here, fitted to the screen. -->
+    <canvas id="clock-wall" width="800" height="480"></canvas>
+
+    <svg class="classic" width="800" height="480" viewBox="0 0 800 480"
+         stroke="#1d1d1d" stroke-linecap="round" stroke-linejoin="round">
+      <defs>
+        <!-- Hand-lettered digits, drawn as marker strokes in a 20x30 box. -->
+        <path id="dg0" d="M10 2C4 2 1.5 9 1.5 15.5C1.5 23 5 28.5 10 28.5C15.5 28.5 18.5 22 18.5 15C18.5 8 15.5 2 10 2Z"/>
+        <path id="dg1" d="M4.5 7.5L11 1.5L11 28.5"/>
+        <path id="dg2" d="M2.5 8C3 3.5 6.5 1.5 10 1.5C14.5 1.5 17.5 4.5 17.5 8.5C17.5 13.5 11 19 2 28.5L19 28"/>
+        <path id="dg3" d="M3 4.5C6 1.5 15.5 0 16.5 7C17 11.5 12.5 14 8 14C14 14 18.5 17 18.5 21.5C18.5 27.5 9.5 30 2.5 26"/>
+        <path id="dg4" d="M14 28.5L14 1.5L2 20L19 20"/>
+        <path id="dg5" d="M17 2L5.5 2L4.5 13C7.5 11 10.5 11 13 12C18 14 19 19 18 23C16.5 28 8 30 3 26"/>
+        <path id="dg6" d="M15.5 2C8 4 2 12 2 20C2 25.5 5.5 28.5 10 28.5C15 28.5 18 25 18 20.5C18 15.5 14 13 10 13C6 13 3 15.5 2.2 19"/>
+        <path id="dg7" d="M2 2L18.5 2L7 28.5"/>
+        <path id="dg8" d="M10 14C5 14 3 11 3 7.5C3 4 6 1.5 10 1.5C14 1.5 17 4 17 7.5C17 11 15 14 10 14C5 14 2 17 2 21.5C2 25.5 5 28.5 10 28.5C15 28.5 18 25.5 18 21.5C18 17 15 14 10 14Z"/>
+        <path id="dg9" d="M18 10C18 5 15 2 10 2C5 2 2 5 2 10C2 14.5 5 17 10 17C14 17 17 15 18 10C18 18 16 24 8 28.5"/>
+      </defs>
+
+      <!-- Numerals are placed by buildClockFace(). -->
+      <g id="clock-nums" fill="none" stroke-width="2.6"></g>
+
+      <!-- Sky: clouds by day, moon and stars at night. -->
+      <g class="awake" fill="#fff" stroke-width="3">
+        <path transform="translate(196 176) scale(1.2)" d="M0 0C-8 0 -12 -10 -4 -14C-4 -24 10 -28 16 -20C20 -30 38 -30 40 -18C50 -20 56 -8 48 0Z"/>
+        <path transform="translate(560 178) scale(1.2)" d="M0 0C-8 0 -12 -10 -4 -14C-4 -24 10 -28 16 -20C20 -30 38 -30 40 -18C50 -20 56 -8 48 0Z"/>
+      </g>
+      <g class="sleep" fill="#fff6c2" stroke-width="2.6">
+        <path transform="translate(598 168)" d="M0 -24A24 24 0 1 0 24 6A18 18 0 1 1 0 -24Z"/>
+        <g stroke="none">
+          <path transform="translate(212 170)" d="M0 -7L1.8 -1.8L7 0L1.8 1.8L0 7L-1.8 1.8L-7 0L-1.8 -1.8Z"/>
+          <path transform="translate(262 300) scale(0.7)" d="M0 -7L1.8 -1.8L7 0L1.8 1.8L0 7L-1.8 1.8L-7 0L-1.8 -1.8Z"/>
+          <path transform="translate(170 250) scale(0.6)" d="M0 -7L1.8 -1.8L7 0L1.8 1.8L0 7L-1.8 1.8L-7 0L-1.8 -1.8Z"/>
+          <path transform="translate(650 270) scale(0.8)" d="M0 -7L1.8 -1.8L7 0L1.8 1.8L0 7L-1.8 1.8L-7 0L-1.8 -1.8Z"/>
+          <path transform="translate(540 120) scale(0.6)" d="M0 -7L1.8 -1.8L7 0L1.8 1.8L0 7L-1.8 1.8L-7 0L-1.8 -1.8Z"/>
+          <path transform="translate(330 140) scale(0.7)" d="M0 -7L1.8 -1.8L7 0L1.8 1.8L0 7L-1.8 1.8L-7 0L-1.8 -1.8Z"/>
+        </g>
+      </g>
+
+      <!-- Doghouse, side on, running off the bottom of the screen. -->
+      <g stroke-width="3.5">
+        <path d="M250 437L560 437L560 492L250 492Z" fill="#c9221f"/>
+        <path d="M226 408L584 408L592 439L218 439Z" fill="#e5352f"/>
+        <path d="M262 455L300 455M318 470L380 470M430 460L470 460M500 474L540 474" fill="none" stroke-width="2.5"/>
+      </g>
+
+      <!-- Drawn Snoopy, sitting on the roof, facing right. Origin = his seat.
+           Only shown if the real art in art/ is missing. -->
+      <g class="drawn" transform="translate(412 409)" stroke-width="3.4">
+        <!-- body -->
+        <path d="M-42 0C-52 -30 -44 -60 -24 -78L18 -80C30 -66 36 -46 36 -26C36 -14 34 -6 30 0Z" fill="#fff"/>
+        <!-- haunch and foot -->
+        <path d="M-36 -8C-38 -28 -20 -40 0 -32" fill="none" stroke-width="2.8"/>
+        <path d="M-10 0C-12 -10 6 -14 30 -12C48 -10 57 -6 56 0Z" fill="#fff"/>
+        <!-- arm -->
+        <path d="M2 -66C6 -50 13 -39 25 -33C30 -31 33 -35 29 -39" fill="none" stroke-width="2.8"/>
+        <!-- collar -->
+        <path d="M-27 -77C-10 -69 8 -69 22 -77L23 -70C8 -61 -10 -61 -28 -69Z" fill="#e5352f" stroke-width="3"/>
+        <!-- head -->
+        <path d="M-30 -80C-56 -98 -56 -160 -12 -170C20 -176 38 -160 48 -150C62 -142 80 -142 89 -131C96 -120 90 -106 74 -104C56 -101 36 -104 24 -97C14 -91 6 -82 0 -78Z" fill="#fff"/>
+        <!-- ear -->
+        <path d="M-8 -166C-36 -168 -58 -142 -54 -112C-52 -94 -36 -90 -28 -100C-20 -112 -18 -134 -6 -152C-2 -158 -2 -164 -8 -166Z" fill="#1d1d1d"/>
+        <!-- nose -->
+        <ellipse cx="85" cy="-127" rx="10" ry="7.5" fill="#1d1d1d" transform="rotate(-20 85 -127)"/>
+        <!-- mouth -->
+        <path class="awake" d="M44 -110C54 -104 64 -103 72 -106" fill="none" stroke-width="3"/>
+        <path class="awake" d="M42 -114L46 -107" fill="none" stroke-width="2.6"/>
+        <path class="sleep" d="M46 -108C56 -106 64 -106 70 -108" fill="none" stroke-width="3"/>
+        <!-- eye: open, blink, asleep -->
+        <g class="awake">
+          <ellipse class="open" cx="32" cy="-142" rx="3.6" ry="7" fill="#1d1d1d" stroke="none"/>
+          <path class="shut" d="M27 -140C30 -137 34 -137 37 -140" fill="none" stroke-width="3"/>
+        </g>
+        <path class="sleep" d="M25 -143C29 -138 35 -138 39 -143" fill="none" stroke-width="3"/>
+      </g>
+
+      <!-- Drawn Woodstock, on the roof to Snoopy's right (fallback, as above). -->
+      <g class="drawn" transform="translate(540 408) scale(1.45)" stroke-width="2.3">
+        <g id="ws-body">
+          <path d="M-5 -3L-7 1.5M4 -3L3 1.5" fill="none" stroke-width="2.2"/>
+          <path d="M-11 -3C-16 -14 -14 -24 -8 -30C-13 -38 -7 -47 2 -47C10 -47 15 -40 12 -31C18 -23 18 -10 12 -3Z" fill="#ffd61f"/>
+          <path d="M2 -46C1 -52 -2 -55 -6 -55M5 -46C5 -53 8 -57 12 -57M4 -46C4 -53 3 -58 1 -61" fill="none" stroke-width="2"/>
+          <path d="M-9 -39L-17 -35.5L-8.5 -33.5" fill="#ffd61f" stroke-width="2"/>
+          <path class="awake" d="M-2 -42.5L-2 -38" fill="none" stroke-width="2.6"/>
+          <path class="sleep" d="M-5 -40C-3 -38 0 -38 1 -40" fill="none" stroke-width="2"/>
+          <path d="M3 -25C9 -21 11 -15 7 -11" fill="none" stroke-width="2"/>
+        </g>
+      </g>
+
+    </svg>
+
+    <!-- The real Snoopy and Woodstock. Kept out of git (copyrighted, and the
+         repo is public) and pushed to the device alongside this file. As HTML
+         images they get their own layers, so Woodstock's hover costs no repaint. -->
+    <img id="art-snoopy" class="art-img classic" alt="" width="162" height="187">
+    <img id="art-woodstock" class="art-img classic" alt="" width="86" height="93">
+
+    <svg class="classic" width="800" height="480" viewBox="0 0 800 480"
+         stroke="#1d1d1d" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Woodstock's chatter. -->
+      <g id="ws-bubble" stroke-width="3">
+        <path d="M548 300C532 300 525 292 525 280L525 250C525 238 532 232 548 232L618 232C632 232 640 238 640 250L640 280C640 292 632 300 618 300L572 300L554 318L560 300Z" fill="#fff"/>
+        <path d="M544 248L544 266M552 246L552 267M560 249L560 265M568 247L568 267M584 248L584 266M592 246L592 267M602 249L602 265M620 247L620 267M550 276L550 288M558 275L558 289M566 277L566 287M582 275L582 289M590 276L590 288M608 277L608 288"
+              fill="none" stroke-width="2.4"/>
+      </g>
+
+      <!-- Hands, drawn pointing at 12 around the origin; rotated by JS. -->
+      <g id="hand-h" transform="translate(400 234)">
+        <path d="M0 0L0 -26" stroke-width="3"/>
+        <path d="M-6.5 -26L6.5 -26L6.5 -110C6.5 -118 -6.5 -118 -6.5 -110Z" fill="#fff" stroke-width="2.6"/>
+      </g>
+      <g id="hand-m" transform="translate(400 234)">
+        <path d="M0 0L0 -26" stroke-width="3"/>
+        <path d="M-6.5 -26L6.5 -26L6.5 -170C6.5 -178 -6.5 -178 -6.5 -170Z" fill="#fff" stroke-width="2.6"/>
+      </g>
+      <g id="hand-s" transform="translate(400 234)" stroke="#e2231a">
+        <path d="M0 26L0 -192" stroke-width="2"/>
+        <circle r="6.5" fill="#e2231a" stroke="#1d1d1d" stroke-width="2"/>
+        <circle r="1.8" fill="#fff" stroke="none"/>
+      </g>
+    </svg>
+
+    <svg class="leaf classic" width="34" height="22" viewBox="0 0 34 22" stroke="#1d1d1d" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 14C8 2 24 0 32 6C26 18 10 22 2 14Z" fill="#8cc63f" stroke-width="2"/>
+      <path d="M2 14C12 10 22 8 32 6" fill="none" stroke-width="1.6"/>
+    </svg>
+    <div class="zz classic">Z</div><div class="zz z2 classic">z</div><div class="zz z3 classic">Z</div>
+
+    <!-- Digital readout for wallpaper scenes, which are too busy for numerals. -->
+    <div id="clock-digital">
+      <div id="cd-time"><span id="cd-hm"></span><span id="cd-ampm"></span></div>
+      <div id="cd-date"></div>
+    </div>
+  </div>
+
   <div id="toast"></div>
   <div id="message"><div id="message-text"></div></div>
   <div id="dbg"></div>
@@ -430,6 +733,7 @@ function applyView() {
   document.getElementById('mixer-view').classList.toggle('active', v === 'mixer');
   document.getElementById('playlists-view').classList.toggle('active', v === 'playlists');
   document.getElementById('message').style.display = 'none';
+  if (v !== 'np') setClockActive(false);
   renderButtonBar();
   if (v === 'mixer') renderMixer();
   else if (v === 'np') renderNowPlaying();
@@ -659,6 +963,7 @@ const ART_PLACEHOLDER = 'linear-gradient(150deg, #2f4a63, #1d2c3b)';
 let lastArtUrl = null;
 function renderNowPlaying() {
   const s = STATE.spotify;
+  setClockActive(!s.track);
   setText(document.getElementById('np-title'), s.track || 'Nothing playing');
   setText(document.getElementById('np-artist'), s.artist || '');
 
@@ -688,6 +993,234 @@ function renderProgress() {
   if (fill.style.width !== w) fill.style.width = w;
   setText(document.getElementById('np-elapsed'), fmtTime(ms));
   setText(document.getElementById('np-remain'), s.durationMs ? '-' + fmtTime(s.durationMs - ms) : '-0:00');
+}
+
+/* =========================================================
+ *  IDLE CLOCK
+ *  Shown in place of Now Playing while nothing is playing. The buttons and
+ *  dial keep their Now Playing meanings — this is only a different face.
+ * ========================================================= */
+const CLOCK_CX = 400, CLOCK_CY = 234;   // hand pivot, just above Snoopy's head
+const CLOCK_RX = 290, CLOCK_RY = 172;   // numeral ring: a squircle, like the watch
+const DIGIT_SCALE = 1.45;               // 20x30 digit box -> ~29x44 px
+const LEAF_EVERY_S = 45;
+
+/* Which face shows when. Each entry runs from its hour until the next one's.
+   `file` is a picture in art/scenes/ (any of .jpg/.png/.jpeg/.webp), shown full
+   screen with a digital clock; null is the analog doghouse face. `winter`
+   replaces `file` in December–February. `pos` places the digital readout
+   (left/top/right) clear of the characters; `light` = white text for dark
+   pictures; `fit: 'cover'` always fills the screen (see drawWall). A missing
+   picture falls back to the analog face. */
+const CLOCK_SCENES = [
+  { from: 6,  file: 'meadow',   pos: 'top', fit: 'cover' },   // flowers at the edges smear if stretched
+  { from: 9,  file: 'tree',     pos: 'left', winter: 'sled' },
+  { from: 12, file: null },
+  { from: 15, file: 'skates',   pos: 'left' },
+  { from: 18, file: 'doghouse', pos: 'top' },
+  { from: 21, file: 'space',    pos: 'left', light: true },
+];
+const SCENE_EXTS = ['jpg', 'png', 'jpeg', 'webp'];
+// Cover-fit a picture if that crops at most this much of it; otherwise fit the
+// whole picture and extend its edges out to the screen.
+const SCENE_MAX_CROP = 0.15;
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const CHAT_EVERY_S = 40;                // Woodstock pipes up for 6s of every 40
+
+let clockBuilt = false;
+let clockTimer = null;
+let blinkTimer = null;
+const clockLast = { h: null, m: null, s: null, phase: null };
+let sceneFile;   // file of the scene currently shown or loading; null = analog
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+/* Place the numerals on the ring at their true angles, so the hands read
+   correctly. 5, 6 and 7 would sit behind the doghouse, so — as on the watch —
+   they're left out. */
+function buildClockFace() {
+  if (clockBuilt) return;
+  const g = document.getElementById('clock-nums');
+  const advance = 20 * DIGIT_SCALE + 3;
+  for (let n = 1; n <= 12; n++) {
+    if (n >= 5 && n <= 7) continue;
+    const a = n * Math.PI / 6;
+    const dx = Math.sin(a), dy = -Math.cos(a);
+    const r = Math.pow(Math.pow(Math.abs(dx) / CLOCK_RX, 4) + Math.pow(Math.abs(dy) / CLOCK_RY, 4), -0.25);
+    const digits = String(n);
+    const x0 = CLOCK_CX + dx * r - (digits.length * advance - 3) / 2;
+    const y0 = CLOCK_CY + dy * r - 15 * DIGIT_SCALE;
+    for (let i = 0; i < digits.length; i++) {
+      g.appendChild(svgEl('use', {
+        href: '#dg' + digits[i],
+        transform: 'translate(' + (x0 + i * advance).toFixed(1) + ' ' + y0.toFixed(1) + ') scale(' + DIGIT_SCALE + ')',
+      }));
+    }
+  }
+  const leaf = document.querySelector('#clock .leaf');
+  leaf.addEventListener('animationend', () => leaf.classList.remove('go'));
+  leaf.addEventListener('webkitAnimationEnd', () => leaf.classList.remove('go'));
+  // Swap in the real art once both images load; if they aren't on the device,
+  // the drawn fallback simply stays.
+  let artLoaded = 0;
+  ['snoopy', 'woodstock'].forEach((name) => {
+    const img = document.getElementById('art-' + name);
+    img.addEventListener('load', () => { if (++artLoaded === 2) clockEl().classList.add('art'); });
+    img.src = 'art/' + name + '.png';
+  });
+  const ws = document.getElementById('ws-body');
+  ws.addEventListener('animationend', () => clockEl().classList.remove('hop'));
+  ws.addEventListener('webkitAnimationEnd', () => clockEl().classList.remove('hop'));
+  clockBuilt = true;
+}
+
+function clockEl() { return document.getElementById('clock'); }
+
+function clockPhase(h) {
+  if (h >= 6 && h < 11) return 'morning';
+  if (h >= 11 && h < 17) return 'day';
+  if (h >= 17 && h < 21) return 'evening';
+  return 'night';
+}
+
+function setHand(id, deg) {
+  document.getElementById(id).setAttribute('transform',
+    'translate(' + CLOCK_CX + ' ' + CLOCK_CY + ') rotate(' + deg.toFixed(2) + ')');
+}
+
+function renderClock(d) {
+  const h = d.getHours(), m = d.getMinutes(), s = d.getSeconds();
+  if (s === clockLast.s && m === clockLast.m && h === clockLast.h) return;
+  clockLast.s = s;
+  const el = clockEl();
+  if (m !== clockLast.m || h !== clockLast.h) {
+    clockLast.m = m; clockLast.h = h;
+    applyScene(d);
+    renderDigital(d);
+    setHand('hand-m', m * 6);
+    setHand('hand-h', (h % 12) * 30 + m * 0.5);
+  }
+  const phase = clockPhase(h);
+  if (phase !== clockLast.phase) {
+    if (clockLast.phase) el.classList.remove(clockLast.phase);
+    el.classList.add(phase);
+    clockLast.phase = phase;
+  }
+  // Wallpaper scenes show minutes only; nothing to do between them.
+  if (el.classList.contains('wall')) return;
+  setHand('hand-s', s * 6);
+  if (phase === 'night') { el.classList.remove('chat'); return; }
+
+  // A little life, all keyed off the once-a-second tick.
+  const t = m * 60 + s;
+  const chatting = t % CHAT_EVERY_S < 6;
+  if (chatting && !el.classList.contains('chat')) el.classList.add('hop');
+  el.classList.toggle('chat', chatting);
+  if (s % 7 === 3) {
+    el.classList.add('blink');
+    if (blinkTimer) clearTimeout(blinkTimer);
+    blinkTimer = setTimeout(() => el.classList.remove('blink'), 160);
+  }
+  if (t % LEAF_EVERY_S === 20) document.querySelector('#clock .leaf').classList.add('go');
+}
+
+function renderDigital(d) {
+  const h = d.getHours(), m = d.getMinutes();
+  setText(document.getElementById('cd-hm'), ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m);
+  setText(document.getElementById('cd-ampm'), h < 12 ? 'AM' : 'PM');
+  setText(document.getElementById('cd-date'),
+    DAY_NAMES[d.getDay()] + '  ' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate());
+}
+
+function sceneFor(d) {
+  const h = d.getHours();
+  let scene = CLOCK_SCENES[CLOCK_SCENES.length - 1];   // before the first slot = last slot, wrapped
+  for (let i = 0; i < CLOCK_SCENES.length; i++) {
+    if (h >= CLOCK_SCENES[i].from) scene = CLOCK_SCENES[i];
+  }
+  const month = d.getMonth();
+  const winter = month === 11 || month <= 1;
+  return { scene: scene, file: (winter && scene.winter) || scene.file };
+}
+
+function setWall(scene) {
+  clockEl().classList.toggle('wall', !!scene);
+  document.getElementById('app').classList.toggle('idle-light', !!(scene && scene.light));
+  document.getElementById('clock-digital').className = 'pos-' + ((scene && scene.pos) || 'top');
+}
+
+// Only reloads when the scene actually changes — a few times a day.
+function applyScene(d) {
+  const pick = sceneFor(d);
+  if (pick.file === sceneFile) return;
+  sceneFile = pick.file;
+  if (!pick.file) { setWall(null); return; }
+  const tryExt = (i) => {
+    if (i >= SCENE_EXTS.length) { if (sceneFile === pick.file) setWall(null); return; }
+    const img = new Image();
+    img.onload = () => {
+      if (sceneFile !== pick.file) return;   // superseded while loading
+      drawWall(img, pick.scene.fit);
+      setWall(pick.scene);
+    };
+    img.onerror = () => tryExt(i + 1);
+    img.src = 'art/scenes/' + pick.file + '.' + SCENE_EXTS[i];
+  };
+  tryExt(0);
+}
+
+/* Fit a picture to the 800x480 screen. Close to the screen's shape, it's
+   scaled to cover and lightly cropped. Otherwise it's shown whole and its
+   outermost row/column of pixels is stretched to the screen edge, so a sky or
+   flat backdrop simply continues; a slight blur hides the streaks. */
+function drawWall(img, fit) {
+  const W = 800, H = 480;
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const cover = Math.max(W / iw, H / ih), contain = Math.min(W / iw, H / ih);
+  const k = (fit === 'cover' || (1 - contain / cover) <= SCENE_MAX_CROP) ? cover : contain;
+  const dw = iw * k, dh = ih * k, dx = (W - dw) / 2, dy = (H - dh) / 2;
+  const ctx = document.getElementById('clock-wall').getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  if (k === contain) {
+    // Strips run well under the picture: blur fades a strip's own edges,
+    // which would otherwise show as a seam where it meets the picture.
+    const o = 10;
+    ctx.filter = 'blur(3px)';
+    if (dx > 0) {
+      ctx.drawImage(img, 2, 0, 1, ih, -o, -o, dx + 2 * o, H + 2 * o);
+      ctx.drawImage(img, iw - 3, 0, 1, ih, dx + dw - o, -o, W - dx - dw + 2 * o, H + 2 * o);
+    }
+    if (dy > 0) {
+      ctx.drawImage(img, 0, 2, iw, 1, -o, -o, W + 2 * o, dy + 2 * o);
+      ctx.drawImage(img, 0, ih - 3, iw, 1, -o, dy + dh - o, W + 2 * o, H - dy - dh + 2 * o);
+    }
+    ctx.filter = 'none';
+  }
+  ctx.drawImage(img, dx, dy, dw, dh);
+}
+
+// Re-armed against the wall clock each time, so the second hand lands on the
+// second instead of drifting with setInterval.
+function tickClock() {
+  const d = new Date();
+  renderClock(d);
+  clockTimer = setTimeout(tickClock, 1010 - d.getMilliseconds());
+}
+
+function setClockActive(on) {
+  document.getElementById('app').classList.toggle('idle', on);
+  if (on && !clockTimer) {
+    buildClockFace();
+    tickClock();
+  } else if (!on && clockTimer) {
+    clearTimeout(clockTimer);
+    clockTimer = null;
+  }
 }
 
 /* =========================================================
@@ -982,6 +1515,7 @@ function connectHardwareWS() {
  *  MESSAGE / START
  * ========================================================= */
 function showMessage(text) {
+  setClockActive(false);
   document.getElementById('now-playing-view').classList.remove('active');
   document.getElementById('mixer-view').classList.remove('active');
   document.getElementById('playlists-view').classList.remove('active');

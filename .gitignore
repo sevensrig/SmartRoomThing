@@ -18,3 +18,7 @@ __pycache__/
 node_modules/
 .pytest_cache/
 .ruff_cache/
+
+# Peanuts character art for the idle clock. Copyrighted and this repo is
+# public, so it stays local and is copied to the Car Thing on deploy.
+car-thing-webapp/art/

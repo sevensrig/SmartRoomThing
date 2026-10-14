@@ -162,6 +162,18 @@ adb shell mount -o remount,rw /
 # Push the file directly (pushing the folder nests a stale copy).
 adb push car-thing-webapp/index.html /usr/share/qt-superbird-app/webapp/index.html
 
+# The idle clock's hand-lettered font.
+adb shell mkdir -p /usr/share/qt-superbird-app/webapp/fonts
+adb push car-thing-webapp/fonts/Schoolbell.woff2 /usr/share/qt-superbird-app/webapp/fonts/Schoolbell.woff2
+
+# Idle-clock art. car-thing-webapp/art/ is gitignored (Peanuts art is
+# copyrighted and this repo is public), so it only exists on your machine.
+# Push each file the same way; without them the clock uses its drawn fallback.
+adb shell mkdir -p /usr/share/qt-superbird-app/webapp/art/scenes
+for f in car-thing-webapp/art/*.png car-thing-webapp/art/scenes/*; do
+  [ -f "$f" ] && adb push "$f" "/usr/share/qt-superbird-app/webapp/${f#car-thing-webapp/}"
+done
+
 # Stop the kiosk Chromium serving a stale cached page after a relaunch.
 # Disable its disk cache once:
 adb shell 'grep -q "disk-cache-size=1" /etc/supervisord.conf || \
