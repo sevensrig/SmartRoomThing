@@ -1,0 +1,4 @@
+# The Pi's SSH host key, pinned so CI only ever talks to the real Pi. It's a
+# public key, so it lives in the repo where a change to it gets reviewed.
+# Regenerate with: ssh birdpi 'cat /etc/ssh/ssh_host_ed25519_key.pub'
+birdpi ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKl+Xcg5QXF5+zCW956eBNqGZFOZyuDyyXAjEaNnJT6j
